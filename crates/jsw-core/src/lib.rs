@@ -7,7 +7,12 @@
 //! any window, GPU or audio device: the machine is [`speccy`], and this crate is
 //! only what Software Projects wrote.
 
+pub mod cartridge;
+pub mod game;
 pub mod room;
+pub mod willy;
 
+pub use game::{FRAMES_PER_SECOND, Game};
 pub use jsw_data::ROOM_COUNT;
 pub use room::Room;
+pub use willy::Willy;

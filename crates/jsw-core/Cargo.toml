@@ -13,5 +13,8 @@ debug = ["speccy/debug"]
 jsw-data.workspace = true
 speccy.workspace = true
 
+[dev-dependencies]
+speccy.workspace = true
+
 [lints]
 workspace = true
