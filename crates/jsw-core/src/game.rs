@@ -11,6 +11,7 @@ use speccy::layout::{
 use speccy::memory::{ATTR_FILE, DISPLAY, Memory};
 use speccy::sound::SoundQueue;
 
+use crate::entity::Entities;
 use crate::room::Room;
 use crate::willy::{self, Outcome, Willy};
 
@@ -20,12 +21,32 @@ pub const FRAMES_PER_SECOND: f32 = 17.0;
 /// The room Willy starts in: The Bathroom.
 pub const START_ROOM: usize = 33;
 
-/// The whole game, so far as milestone 2a goes.
+/// Frames the death sequence lasts.
+const DEATH_FRAMES: u8 = 16;
+
+/// Lives a new game starts with, from the original's 34784.
+pub const STARTING_LIVES: u8 = 7;
+
+/// What the game is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Playing,
+    /// Willy has had a fatal accident; the original flashes him and drops him
+    /// back into the room. Counts down.
+    Dying(u8),
+    /// Out of lives.
+    GameOver,
+}
+
+/// The whole game.
 #[derive(Debug)]
 pub struct Game {
     pub mem: Memory,
     pub room: Room,
     pub willy: Willy,
+    pub entities: Entities,
+    pub lives: u8,
+    pub mode: Mode,
     pub sounds: SoundQueue,
     /// Set when the player asks to leave, sending the shell back to the picker.
     pub quit: bool,
@@ -49,6 +70,9 @@ impl Game {
             mem: Memory::new(),
             room: Room::load(START_ROOM),
             willy: Willy::default(),
+            entities: Entities::default(),
+            lives: STARTING_LIVES,
+            mode: Mode::Playing,
             sounds: SoundQueue::default(),
             quit: false,
             paused: false,
@@ -68,6 +92,7 @@ impl Game {
     /// Load a room, draw it into the empty-room buffers, and put its name up.
     fn enter_room(&mut self, number: usize) {
         self.room = Room::load(number % jsw_data::ROOM_COUNT);
+        self.entities = Entities::load(&self.room);
         self.mem.fill(SCREEN_BACK, PLAY_PIXELS, 0);
         self.mem.fill(ATTR_BACK, PLAY_ATTRS, 0);
         self.room.draw(&mut self.mem);
@@ -110,6 +135,21 @@ impl Game {
         self.mem.copy(ATTR_BACK, ATTR_BUF, PLAY_ATTRS);
         self.mem.copy(SCREEN_BACK, SCREEN_BUF, PLAY_PIXELS);
 
+        match self.mode {
+            Mode::Dying(step) => {
+                self.update_dying(step);
+                self.present();
+                return;
+            }
+            Mode::GameOver => {
+                self.present();
+                return;
+            }
+            Mode::Playing => {}
+        }
+
+        self.entities.step();
+
         let outcome = self.willy.update(
             &self.room,
             &mut self.mem,
@@ -119,10 +159,54 @@ impl Game {
                 jump: input.jump,
             },
         );
+        if outcome == Outcome::Died {
+            self.kill();
+            self.present();
+            return;
+        }
         self.take_exit(outcome);
 
         self.draw_willy();
+        // Guardians are drawn over Willy and report touching him, which is how
+        // the original detects the collision.
+        if self.entities.draw(&mut self.mem) {
+            self.kill();
+        }
         self.present();
+    }
+
+    /// A fatal accident: the original sets the airborne indicator to 255 and
+    /// drops back into the main loop, which starts the death sequence.
+    fn kill(&mut self) {
+        if self.mode != Mode::Playing {
+            return;
+        }
+        self.willy.airborne = 255;
+        self.mode = Mode::Dying(DEATH_FRAMES);
+    }
+
+    /// Flash through the death sequence, then put him back in the room he died
+    /// in, one life the poorer.
+    fn update_dying(&mut self, step: u8) {
+        // A rising note per step, as the original's death sound does.
+        self.sounds.note(step.wrapping_mul(4) | 7, 8);
+
+        if step > 0 {
+            self.mode = Mode::Dying(step - 1);
+            self.draw_willy();
+            return;
+        }
+
+        self.lives = self.lives.saturating_sub(1);
+        if self.lives == 0 {
+            self.mode = Mode::GameOver;
+            return;
+        }
+
+        self.willy = Willy::default();
+        self.mode = Mode::Playing;
+        let room = self.room.number;
+        self.enter_room(room);
     }
 
     /// Follow whichever edge Willy walked off.
@@ -196,11 +280,15 @@ impl Game {
         }
     }
 
-    /// Push the debug switches into the parts that read them. Nothing reads
-    /// them yet in 2a; guardians arrive in 2b.
+    /// Push the debug switches into the parts that read them.
     #[inline]
     #[allow(clippy::unused_self)]
-    fn sync_debug(&mut self) {}
+    fn sync_debug(&mut self) {
+        #[cfg(feature = "debug")]
+        {
+            self.entities.disabled = self.debug.no_guardians;
+        }
+    }
 
     /// Enter a room directly, for looking at one without walking there.
     ///
@@ -284,6 +372,47 @@ mod tests {
                 "row {row} of his sprite was left in the background's colour"
             );
         }
+    }
+
+    #[test]
+    fn a_guardian_costs_a_life_and_puts_him_back_in_the_room() {
+        let mut game = Game::new();
+        let room = game.room.number;
+        assert_eq!(game.lives, STARTING_LIVES);
+
+        // A fatal accident, however he came by it.
+        game.kill();
+        assert!(matches!(game.mode, Mode::Dying(_)));
+
+        // Run the sequence out.
+        for _ in 0..DEATH_FRAMES + 2 {
+            game.update(speccy::Input::default());
+            game.sounds.clear();
+        }
+        assert_eq!(game.mode, Mode::Playing);
+        assert_eq!(game.lives, STARTING_LIVES - 1);
+        assert_eq!(game.room.number, room, "he should reappear where he died");
+    }
+
+    #[test]
+    fn running_out_of_lives_ends_the_game() {
+        let mut game = Game::new();
+        game.lives = 1;
+        game.kill();
+        for _ in 0..DEATH_FRAMES + 2 {
+            game.update(speccy::Input::default());
+            game.sounds.clear();
+        }
+        assert_eq!(game.mode, Mode::GameOver);
+        assert_eq!(game.lives, 0);
+    }
+
+    #[test]
+    fn entering_a_room_loads_its_guardians() {
+        let mut game = Game::new();
+        game.goto_room(0);
+        // The Off Licence names three.
+        assert_eq!(game.entities.kinds().len(), 3);
     }
 
     #[test]

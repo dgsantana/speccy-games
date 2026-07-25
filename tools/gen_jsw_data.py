@@ -34,7 +34,11 @@ ROOM_COUNT = 64
 ROOM_SIZE = 0x100
 
 ENTITY_DEFS = 0xA000
-ENTITY_DEF_COUNT = 128
+# The original computes an entity definition's address as 40960 + 8 * N with no
+# check on N, and a few rooms name an N past the 128 definitions that exist. So
+# the window emitted here is the full 256 the arithmetic can reach, overlapping
+# the item table just as the machine's memory does.
+ENTITY_DEF_COUNT = 256
 ENTITY_DEF_SIZE = 8
 
 ITEM_TABLE = 0xA400
@@ -129,7 +133,9 @@ def verify(memory, snapshot_path):
     collected = 64
     regions = [
         ("rooms", ROOMS, ROOM_COUNT * ROOM_SIZE, 255),
-        ("entity definitions", ENTITY_DEFS, ENTITY_DEF_COUNT * ENTITY_DEF_SIZE, 255),
+        # Only the 128 real definitions; the window emitted is wider than that
+        # and runs into the item table, whose flags are live state.
+        ("entity definitions", ENTITY_DEFS, 128 * ENTITY_DEF_SIZE, 255),
         ("item table", ITEM_TABLE, 512, 255 - collected),
         ("Willy's sprites", WILLY_SPRITES, 256, 255),
         ("guardian graphics", GUARDIAN_GRAPHICS, 2048, 255),
@@ -224,7 +230,9 @@ def main():
             for n in range(ENTITY_DEF_COUNT)
         ]
         emit(f, "ENTITY_DEFS", "u8", [ENTITY_DEF_COUNT, ENTITY_DEF_SIZE], defs,
-             "Entity definitions: ropes, arrows and guardians, eight bytes each.")
+             "Entity definitions: ropes, arrows and guardians, eight bytes each. "
+             "Only the first 128 are definitions; the rest is whatever the "
+             "original would read past them, which a few rooms do.")
         emit(f, "ROPE_TABLE", "u8", [256], list(memory[ROPE_TABLE:ROPE_TABLE + 256]),
              "How far to rotate a rope's sprite at each point along its swing.")
         emit(f, "SCREEN_TABLE", "u8", [256],
