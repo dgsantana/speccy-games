@@ -6,8 +6,10 @@
 //! scaled up to the window, and shows the picker in between.
 
 mod debug;
+mod handover;
 mod menu;
 
+use handover::Handover;
 use macroquad::prelude::*;
 use menu::{CATALOGUE, Choice, Menu};
 use speccy::{Cartridge, Frame, HEIGHT, Input, PALETTE, WIDTH};
@@ -42,6 +44,9 @@ async fn main() {
     // The catalogue row to come back to when a game is put away.
     let mut playing = 0usize;
     let mut running = true;
+    // Enter and Escape both change the screen, so neither may act on the one
+    // it arrives at until it has been let go.
+    let mut handover = Handover::default();
 
     let beeper = Beeper::new();
     let mut frame = Frame::new();
@@ -75,8 +80,9 @@ async fn main() {
         while tick_accumulator >= step {
             tick_accumulator -= step;
 
+            let input = handover.filter(read_input());
             match &mut screen {
-                Screen::Picker(picker) => match picker.update(read_input()) {
+                Screen::Picker(picker) => match picker.update(input) {
                     Choice::Stay => {}
                     Choice::Play(index) => {
                         playing = index;
@@ -84,17 +90,19 @@ async fn main() {
                             .launch
                             .expect("the picker only starts games it can start");
                         screen = Screen::Playing(launch());
+                        handover.latch();
                     }
                     Choice::Quit => running = false,
                 },
                 Screen::Playing(game) => {
-                    game.update(read_input());
+                    game.update(input);
                     for sound in game.sounds().drain() {
                         beeper.play(sound);
                     }
                     if game.finished() {
                         beeper.play(speccy::Sound::Silence);
                         screen = Screen::Picker(Menu::new(playing));
+                        handover.latch();
                     }
                 }
             }
