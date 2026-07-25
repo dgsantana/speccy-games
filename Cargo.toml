@@ -1,0 +1,65 @@
+[workspace]
+resolver = "3"
+members = ["crates/mm-audio", "crates/mm-core", "crates/mm-data"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/dgsantana/manic-miner-rs"
+
+[workspace.dependencies]
+mm-audio = { path = "crates/mm-audio" }
+mm-core = { path = "crates/mm-core" }
+mm-data = { path = "crates/mm-data" }
+cpal = "0.15"
+macroquad = "0.4"
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# The engine deals in Spectrum byte and address widths throughout, so casting
+# between integer sizes is the job rather than a smell.
+cast_possible_truncation = "allow"
+cast_lossless = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+# Bit masks are written the way the disassembly writes them (240, 224, 248...),
+# so that engine code can be read side by side with the original.
+unreadable_literal = "allow"
+unusual_byte_groupings = "allow"
+verbose_bit_mask = "allow"
+decimal_bitwise_operands = "allow"
+# Copying a two-byte address is cheaper to read than reasoning about a borrow.
+trivially_copy_pass_by_ref = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+
+[package]
+name = "manic-miner-rs"
+description = "Manic Miner (1983) ported to Rust and macroquad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+macroquad.workspace = true
+mm-audio.workspace = true
+mm-core.workspace = true
+
+[lints]
+workspace = true
+
+[profile.release]
+lto = "thin"

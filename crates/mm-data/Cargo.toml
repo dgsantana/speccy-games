@@ -1,0 +1,12 @@
+[package]
+name = "mm-data"
+description = "Manic Miner game data tables, transcribed from the published disassembly"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

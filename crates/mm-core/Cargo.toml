@@ -1,0 +1,13 @@
+[package]
+name = "mm-core"
+description = "Manic Miner game engine, independent of any window or audio backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+mm-data.workspace = true
+
+[lints]
+workspace = true
