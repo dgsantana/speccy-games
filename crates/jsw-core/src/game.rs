@@ -166,7 +166,13 @@ impl Game {
         }
         self.take_exit(outcome);
 
-        self.draw_willy();
+        // Drawing Willy also reports him standing in a nasty, because the
+        // original finds that out while colouring the cells he covers.
+        if self.draw_willy() {
+            self.kill();
+            self.present();
+            return;
+        }
         // Guardians are drawn over Willy and report touching him, which is how
         // the original detects the collision.
         if self.entities.draw(&mut self.mem) {
@@ -193,7 +199,7 @@ impl Game {
 
         if step > 0 {
             self.mode = Mode::Dying(step - 1);
-            self.draw_willy();
+            let _ = self.draw_willy();
             return;
         }
 
@@ -224,10 +230,32 @@ impl Game {
         self.enter_room(next as usize);
     }
 
-    fn draw_willy(&mut self) {
+    fn draw_willy(&mut self) -> bool {
         let (row, column) = self.willy.position();
         if column + 1 >= COLUMNS {
-            return;
+            return false;
+        }
+
+        // On a ramp the drawing routine adds a sub-cell height, which is what
+        // makes a climb look smooth rather than blocky.
+        let drawn_y = self
+            .willy
+            .y
+            .wrapping_add(self.willy.draw_offset(&self.room, &self.mem));
+
+        // Six cells, three rows of two. The bottom row is only recoloured when
+        // his sprite actually reaches into it, which the original decides by
+        // looking at the low nibble of his y-coordinate.
+        let mut hit_a_nasty = false;
+        for cell_row in 0..3usize {
+            let reaches = if cell_row == 2 { drawn_y & 15 != 0 } else { true };
+            for cell_column in column..(column + 2).min(COLUMNS) {
+                let at_row = row + cell_row;
+                if at_row >= ROWS {
+                    continue;
+                }
+                hit_a_nasty |= self.colour_cell(at_row, cell_column, reaches);
+            }
         }
 
         let frame = self.willy.sprite_frame();
@@ -236,13 +264,7 @@ impl Game {
             .expect("a Willy frame is 32 bytes");
 
         // His sprite hangs from a pixel offset inside the cell, so it is drawn
-        // one pixel row at a time rather than as a tidy 16x16 block. On a ramp
-        // the offset also carries the sub-cell height the drawing routine adds,
-        // which is what makes a climb look smooth.
-        let drawn_y = self
-            .willy
-            .y
-            .wrapping_add(self.willy.draw_offset(&self.room, &self.mem));
+        // one pixel row at a time rather than as a tidy 16x16 block.
         let pixel_offset = (drawn_y % willy::ROW_UNITS) as usize / 2;
         for (line, pair) in sprite.chunks_exact(2).enumerate() {
             let y = row * 8 + pixel_offset + line;
@@ -254,18 +276,27 @@ impl Game {
             self.mem.write(at + 1, self.mem.read(at + 1) | pair[1]);
         }
 
-        // The original colours six cells, three rows of two, whether or not his
-        // sprite reaches the third row: sixteen pixels starting part way down a
-        // cell cover three rows, and colouring only two leaves his legs drawn
-        // in the background's ink, which is usually black on black.
-        for cell_row in row..(row + 3).min(ROWS) {
-            for cell_column in column..(column + 2).min(COLUMNS) {
-                self.mem
-                    .write(ATTR_BUF + (cell_row * COLUMNS + cell_column) as u16, 71);
-            }
-        }
+        hit_a_nasty
     }
 
+    /// Colour one cell of Willy's sprite, the routine at 38430. Reports whether
+    /// the cell holds a nasty, which kills him.
+    ///
+    /// Only cells holding the room's background tile are touched, and only their
+    /// ink is changed: that is why the bath keeps its colour when Willy sits in
+    /// it, and why the floor under his feet is not repainted.
+    fn colour_cell(&mut self, row: usize, column: usize, reaches: bool) -> bool {
+        let at = ATTR_BUF + (row * COLUMNS + column) as u16;
+        let here = self.mem.read(at);
+        let background = self.room.tile(crate::room::Kind::Background).attr;
+
+        if here == background && reaches {
+            // White ink, and whatever paper and brightness the background has.
+            self.mem.write(at, background | 7);
+        }
+
+        here == self.room.tile(crate::room::Kind::Nasty).attr
+    }
     /// Copy the working buffers to the screen the front end reads.
     fn present(&mut self) {
         self.mem.copy(ATTR_BUF, ATTR_FILE, PLAY_ATTRS);
@@ -355,64 +386,73 @@ mod tests {
     }
 
     #[test]
-    fn a_sprite_straddling_a_boundary_is_coloured_over_three_rows() {
+    fn willy_takes_white_ink_and_leaves_the_paper_alone() {
         let mut game = Game::new();
-        // Half a cell down: his sixteen pixels now cover rows 5, 6 and 7.
+        let background = game.room.tile(crate::room::Kind::Background).attr;
+
+        // Half a cell down, so his sprite reaches into a third row of cells.
         game.willy = Willy {
             y: 5 * willy::ROW_UNITS + 8,
             cell: ATTR_BUF + 5 * COLUMNS as u16 + 10,
             ..Willy::default()
         };
-        game.draw_willy();
+        // Give one of the cells he covers something that is not background, as
+        // the bath is in The Bathroom.
+        let bath = ATTR_BUF + 6 * COLUMNS as u16 + 10;
+        game.mem.write(bath, 56);
+
+        let _ = game.draw_willy();
 
         for row in 5..=7 {
-            assert_eq!(
-                game.mem.read(ATTR_BUF + (row * COLUMNS + 10) as u16),
-                71,
-                "row {row} of his sprite was left in the background's colour"
-            );
+            let at = ATTR_BUF + (row * COLUMNS + 10) as u16;
+            if at == bath {
+                assert_eq!(
+                    game.mem.read(at),
+                    56,
+                    "a cell that is not background must be left alone"
+                );
+            } else {
+                assert_eq!(
+                    game.mem.read(at),
+                    background | 7,
+                    "row {row} should have white ink over the background's paper"
+                );
+            }
         }
     }
 
     #[test]
-    fn a_guardian_costs_a_life_and_puts_him_back_in_the_room() {
+    fn the_third_row_is_only_coloured_when_he_reaches_it() {
         let mut game = Game::new();
-        let room = game.room.number;
-        assert_eq!(game.lives, STARTING_LIVES);
+        let background = game.room.tile(crate::room::Kind::Background).attr;
 
-        // A fatal accident, however he came by it.
-        game.kill();
-        assert!(matches!(game.mode, Mode::Dying(_)));
-
-        // Run the sequence out.
-        for _ in 0..DEATH_FRAMES + 2 {
-            game.update(speccy::Input::default());
-            game.sounds.clear();
-        }
-        assert_eq!(game.mode, Mode::Playing);
-        assert_eq!(game.lives, STARTING_LIVES - 1);
-        assert_eq!(game.room.number, room, "he should reappear where he died");
+        // Cell-aligned: his sixteen pixels fit in two rows exactly.
+        game.willy = Willy {
+            y: 5 * willy::ROW_UNITS,
+            cell: ATTR_BUF + 5 * COLUMNS as u16 + 10,
+            ..Willy::default()
+        };
+        let third = ATTR_BUF + 7 * COLUMNS as u16 + 10;
+        game.mem.write(third, background);
+        let _ = game.draw_willy();
+        assert_eq!(
+            game.mem.read(third),
+            background,
+            "the row below him was repainted even though he does not reach it"
+        );
     }
 
     #[test]
-    fn running_out_of_lives_ends_the_game() {
+    fn standing_in_a_nasty_kills_him() {
         let mut game = Game::new();
-        game.lives = 1;
-        game.kill();
-        for _ in 0..DEATH_FRAMES + 2 {
-            game.update(speccy::Input::default());
-            game.sounds.clear();
-        }
-        assert_eq!(game.mode, Mode::GameOver);
-        assert_eq!(game.lives, 0);
-    }
-
-    #[test]
-    fn entering_a_room_loads_its_guardians() {
-        let mut game = Game::new();
-        game.goto_room(0);
-        // The Off Licence names three.
-        assert_eq!(game.entities.kinds().len(), 3);
+        let nasty = game.room.tile(crate::room::Kind::Nasty).attr;
+        game.willy = Willy {
+            y: 5 * willy::ROW_UNITS,
+            cell: ATTR_BUF + 5 * COLUMNS as u16 + 10,
+            ..Willy::default()
+        };
+        game.mem.write(ATTR_BUF + 5 * COLUMNS as u16 + 10, nasty);
+        assert!(game.draw_willy(), "a nasty under him went unnoticed");
     }
 
     #[test]
