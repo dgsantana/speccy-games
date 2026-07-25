@@ -10,8 +10,14 @@
 pub enum Sound {
     /// A single note.
     Note { pitch: u8, duration: u8 },
-    /// Two pitches interleaved, which is how the title tune fakes two voices.
-    Chord { low: u8, high: u8, duration: u8 },
+    /// Two counters flipping the same speaker bit, which is how the theme tune
+    /// is written. The two bytes are not a low and a high note: each is a
+    /// countdown, so a larger byte flips more slowly.
+    Chord {
+        first: u8,
+        second: u8,
+        duration: u8,
+    },
     /// Stop whatever is playing.
     Silence,
 }

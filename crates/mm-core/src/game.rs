@@ -25,9 +25,9 @@ const THEME_NOTES: usize = mm_data::music::THEME_TUNE.len();
 /// Characters of the scrolling message, which is longer than the screen is wide.
 const SCROLL_STEPS: usize = 292;
 
-/// How long a note lasts, per unit of its duration byte: `256` iterations of the
-/// original's sound loop at roughly 56 T-states on a 3.5 MHz Z80.
-const BEEP_UNIT_SECONDS: f32 = 0.004_125;
+/// How long a note lasts, per unit of its duration byte: 256 iterations of the
+/// original's sound loop at 56 T-states each on a 3.5 MHz Z80.
+const BEEP_UNIT_SECONDS: f32 = 256.0 * 56.0 / 3_500_000.0;
 
 /// Duration units elapsed per frame, in 1/256ths.
 ///
@@ -190,19 +190,23 @@ impl Game {
         }
 
         if note < THEME_NOTES {
-            let [duration, low, high] = mm_data::music::THEME_TUNE[note];
+            let [duration, first, second] = mm_data::music::THEME_TUNE[note];
 
             // The clock always carries less than one frame of credit into a new
             // note, so this is true on exactly the first frame of each one.
             if self.tune_clock < TUNE_UNITS_PER_FRAME {
                 if note > 0 {
-                    let [_, prev_low, prev_high] = mm_data::music::THEME_TUNE[note - 1];
-                    self.mem.write(piano_key(prev_low), 56);
-                    self.mem.write(piano_key(prev_high), 56);
+                    let [_, prev_first, prev_second] = mm_data::music::THEME_TUNE[note - 1];
+                    self.mem.write(piano_key(prev_first), 56);
+                    self.mem.write(piano_key(prev_second), 56);
                 }
-                self.mem.write(piano_key(low), 80);
-                self.mem.write(piano_key(high), 40);
-                self.sounds.push(Sound::Chord { low, high, duration });
+                self.mem.write(piano_key(first), 80);
+                self.mem.write(piano_key(second), 40);
+                self.sounds.push(Sound::Chord {
+                    first,
+                    second,
+                    duration,
+                });
             }
 
             self.tune_clock += TUNE_UNITS_PER_FRAME;

@@ -1,21 +1,32 @@
-//! A square-wave beeper, the way the Spectrum made every sound it ever made.
+//! A square-wave beeper, driven by emulating the original's sound loop.
 //!
-//! Both constants below come from counting T-states in the original's sound
-//! loop at 37596, which runs `256 * duration` iterations of roughly 56 T-states
-//! each on a 3.5 MHz Z80:
+//! The routine at 37596 is where every note in the theme tune comes from:
 //!
 //! ```text
-//! OUT (254),A   11      one iteration is about 56 T-states, so 16.1 us
-//! DEC D          4      D counts down and reloads, flipping the speaker
-//! JR NZ         12      every D iterations: a full cycle is 2*D iterations
-//! DEC E          4      E does the same independently, which is why a note
-//! JR NZ         12      can light two piano keys
-//! DJNZ          13      the inner loop runs 256 times per duration unit
+//! OUT (254),A   11      the speaker level is written every iteration
+//! DEC D          4      D counts down, reloads, and flips the speaker
+//! JR NZ         12
+//! DEC E          4      E does the same, independently
+//! JR NZ         12
+//! DJNZ          13      256 iterations per unit of the duration byte
 //! ```
 //!
-//! A full cycle at parameter `F` therefore takes `2 * F * 16.1 us`, giving
-//! [`PITCH_SCALE`] divided by `F` hertz, and one unit of duration lasts
-//! `256 * 56 / 3_500_000` seconds, which is [`BEEP_UNIT`].
+//! An iteration is 56 T-states, so at 3.5 MHz the loop runs at
+//! [`ITERATIONS_PER_SECOND`] and one duration unit lasts [`BEEP_UNIT`].
+//!
+//! What matters is that `D` and `E` flip the *same* speaker bit. The output is
+//! therefore the exclusive-or of two square waves, not two tones played in
+//! turn. For the near-equal pairs the tune uses for its melody — 128 and 129,
+//! 102 and 103 — the two flips interleave and the speaker changes state once
+//! every `D` iterations rather than every `2 * D`, so the note sounds an octave
+//! above a plain square wave at the same counter value. For the wide pairs used
+//! for accompaniment it produces the rough two-tone buzz the tune is known for.
+//! Approximating any of this with an oscillator gets the pitch wrong, so this
+//! synth just runs the counters.
+//!
+//! The two frequency bytes of zero in the tune data need no special case: `DEC`
+//! from zero wraps to 255, so a zero byte is a 256-iteration counter, and when
+//! both counters are 256 they flip together and cancel. That is the tune's rest.
 //!
 //! If no audio device is available the beeper silently does nothing, because a
 //! missing sound card should not stop anyone playing.
@@ -26,67 +37,114 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use mm_core::Sound;
 
-/// Frequency of a note is `PITCH_SCALE / pitch`, in hertz.
-pub const PITCH_SCALE: f32 = 31_037.0;
+/// Iterations of the sound loop per second: 3.5 MHz divided by 56 T-states.
+pub const ITERATIONS_PER_SECOND: f32 = 62_500.0;
 
-/// Seconds in one unit of a duration byte.
-pub const BEEP_UNIT: f32 = 0.004_125;
-/// How long the beeper spends on each half of a chord before swapping.
-const CHORD_SWAP: f32 = 0.001_5;
+/// Seconds in one unit of a duration byte, being 256 iterations of the loop.
+pub const BEEP_UNIT: f32 = 256.0 / ITERATIONS_PER_SECOND;
+
+/// A single counter flips the speaker every `pitch` iterations, so a full cycle
+/// takes `2 * pitch` of them and the frequency is `PITCH_SCALE / pitch` hertz.
+pub const PITCH_SCALE: f32 = ITERATIONS_PER_SECOND / 2.0;
+
 /// Peak amplitude. The Spectrum's speaker was not subtle, but our ears are.
 const AMPLITUDE: f32 = 0.12;
 
-/// The state the audio callback reads.
+/// A counter byte, where zero means a full 256 because `DEC` wraps.
+fn counter(byte: u8) -> u16 {
+    if byte == 0 { 256 } else { u16::from(byte) }
+}
+
+/// The speaker, as a pair of down-counters.
 #[derive(Debug, Default)]
 struct Voice {
     sample_rate: f32,
-    /// Square wave phase, 0.0 to 1.0.
-    phase: f32,
-    /// The frequency currently sounding, or zero for silence.
-    frequency: f32,
-    /// The other half of a chord, if one is playing.
-    alternate: f32,
-    /// Seconds left before the note ends.
+    /// Loop iterations per output sample, a little over one at 48 kHz.
+    iters_per_sample: f32,
+    /// Fractional iterations carried into the next sample.
+    carry: f32,
+    d_reload: u16,
+    d: u16,
+    /// The second counter, absent for a single-pitch sound effect.
+    e_reload: Option<u16>,
+    e: u16,
+    /// Current speaker level.
+    high: bool,
+    /// Seconds left before the sound ends.
     remaining: f32,
-    /// Seconds left before a chord swaps halves.
-    swap_in: f32,
 }
 
 impl Voice {
-    fn start(&mut self, frequency: f32, alternate: f32, seconds: f32) {
-        self.frequency = frequency;
-        self.alternate = alternate;
+    fn set_sample_rate(&mut self, rate: f32) {
+        self.sample_rate = rate;
+        self.iters_per_sample = ITERATIONS_PER_SECOND / rate;
+    }
+
+    /// Start a single-pitch sound, as the effect routines produce.
+    fn start_note(&mut self, pitch: u8, seconds: f32) {
+        self.d_reload = counter(pitch);
+        self.d = self.d_reload;
+        self.e_reload = None;
         self.remaining = seconds;
-        self.swap_in = CHORD_SWAP;
+    }
+
+    /// Start a two-counter note, as the theme tune produces.
+    fn start_chord(&mut self, first: u8, second: u8, seconds: f32) {
+        self.d_reload = counter(first);
+        self.d = self.d_reload;
+        let reload = counter(second);
+        self.e_reload = Some(reload);
+        self.e = reload;
+        self.remaining = seconds;
     }
 
     fn silence(&mut self) {
-        self.frequency = 0.0;
-        self.alternate = 0.0;
         self.remaining = 0.0;
     }
 
-    /// Produce the next sample.
-    fn next_sample(&mut self) -> f32 {
-        if self.remaining <= 0.0 || self.frequency <= 0.0 {
-            return 0.0;
+    /// One iteration of the loop: decrement each counter, flipping on reload.
+    fn tick(&mut self) {
+        self.d -= 1;
+        if self.d == 0 {
+            self.d = self.d_reload;
+            self.high = !self.high;
         }
-        let step = 1.0 / self.sample_rate;
-        self.remaining -= step;
-
-        if self.alternate > 0.0 {
-            self.swap_in -= step;
-            if self.swap_in <= 0.0 {
-                std::mem::swap(&mut self.frequency, &mut self.alternate);
-                self.swap_in = CHORD_SWAP;
+        if let Some(reload) = self.e_reload {
+            self.e -= 1;
+            if self.e == 0 {
+                self.e = reload;
+                self.high = !self.high;
             }
         }
+    }
 
-        self.phase += self.frequency * step;
-        if self.phase >= 1.0 {
-            self.phase -= self.phase.floor();
+    fn level(&self) -> f32 {
+        if self.high { AMPLITUDE } else { -AMPLITUDE }
+    }
+
+    /// Produce the next sample, averaging over the iterations it spans.
+    ///
+    /// The loop runs faster than any sane output rate, so a sample covers one
+    /// or two iterations; averaging them is a cheap anti-alias filter.
+    fn next_sample(&mut self) -> f32 {
+        if self.remaining <= 0.0 || self.d_reload == 0 {
+            return 0.0;
         }
-        if self.phase < 0.5 { AMPLITUDE } else { -AMPLITUDE }
+        self.remaining -= 1.0 / self.sample_rate;
+
+        self.carry += self.iters_per_sample;
+        let steps = self.carry as u32;
+        self.carry -= steps as f32;
+
+        if steps == 0 {
+            return self.level();
+        }
+        let mut sum = 0.0;
+        for _ in 0..steps {
+            sum += self.level();
+            self.tick();
+        }
+        sum / steps as f32
     }
 }
 
@@ -101,7 +159,7 @@ impl fmt::Debug for Beeper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Beeper")
             .field("active", &self.stream.is_some())
-            .field("voice", &self.voice.lock().ok().map(|v| v.frequency))
+            .field("playing", &self.voice.lock().ok().map(|v| v.remaining > 0.0))
             .finish()
     }
 }
@@ -130,31 +188,23 @@ impl Beeper {
         };
         match sound {
             Sound::Note { pitch, duration } => {
-                voice.start(frequency_of(pitch), 0.0, f32::from(duration) * BEEP_UNIT);
+                voice.start_note(pitch, f32::from(duration) * BEEP_UNIT);
             }
             Sound::Chord {
-                low,
-                high,
+                first,
+                second,
                 duration,
             } => {
-                voice.start(
-                    frequency_of(low),
-                    frequency_of(high),
-                    f32::from(duration) * BEEP_UNIT,
-                );
+                voice.start_chord(first, second, f32::from(duration) * BEEP_UNIT);
             }
             Sound::Silence => voice.silence(),
         }
     }
 }
 
-/// Frequency in hertz for one of the original's pitch bytes.
+/// Frequency in hertz of a single-counter sound effect.
 pub fn frequency_of(pitch: u8) -> f32 {
-    if pitch == 0 {
-        0.0
-    } else {
-        PITCH_SCALE / f32::from(pitch)
-    }
+    PITCH_SCALE / f32::from(counter(pitch))
 }
 
 fn build_stream(voice: &Arc<Mutex<Voice>>) -> Option<cpal::Stream> {
@@ -163,7 +213,7 @@ fn build_stream(voice: &Arc<Mutex<Voice>>) -> Option<cpal::Stream> {
     let sample_rate = config.sample_rate() as f32;
     let channels = config.channels() as usize;
 
-    voice.lock().ok()?.sample_rate = sample_rate;
+    voice.lock().ok()?.set_sample_rate(sample_rate);
 
     let voice = Arc::clone(voice);
     let on_error = |err| eprintln!("audio stream error: {err}");
@@ -215,41 +265,83 @@ fn fill(voice: &Arc<Mutex<Voice>>, data: &mut [f32], channels: usize) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_larger_pitch_byte_is_a_lower_note() {
-        assert!(frequency_of(43) > frequency_of(203));
-        assert!(frequency_of(0) < f32::EPSILON);
+    /// Run the voice for a while and report the fundamental, by counting how
+    /// often the speaker changes level.
+    fn measured_hz(voice: &mut Voice, seconds: f32) -> f32 {
+        let samples = (voice.sample_rate * seconds) as usize;
+        let mut flips = 0;
+        let mut last = voice.next_sample() > 0.0;
+        for _ in 1..samples {
+            let now = voice.next_sample() > 0.0;
+            if now != last {
+                flips += 1;
+            }
+            last = now;
+        }
+        flips as f32 / 2.0 / seconds
+    }
+
+    fn voice_at(rate: f32) -> Voice {
+        let mut voice = Voice::default();
+        voice.set_sample_rate(rate);
+        voice
     }
 
     #[test]
-    fn the_title_tune_lands_in_a_musical_register() {
-        // The tune spans roughly B3 to F5, which is where a beeper sounds like
-        // music rather than like a smoke alarm.
-        assert!((frequency_of(128) - 242.0).abs() < 2.0);
-        assert!(frequency_of(203) > 140.0);
-        assert!(frequency_of(43) < 750.0);
+    fn a_larger_pitch_byte_is_a_lower_note() {
+        assert!(frequency_of(43) > frequency_of(203));
     }
 
     #[test]
     fn note_lengths_match_the_original_loop() {
-        // The two durations the theme tune uses, in milliseconds.
-        assert!((80.0 * BEEP_UNIT - 0.330).abs() < 0.005);
-        assert!((50.0 * BEEP_UNIT - 0.206).abs() < 0.005);
+        // The two durations the theme tune uses, in seconds.
+        assert!((80.0 * BEEP_UNIT - 0.328).abs() < 0.005);
+        assert!((50.0 * BEEP_UNIT - 0.205).abs() < 0.005);
     }
 
     #[test]
-    fn a_note_stops_when_its_duration_runs_out() {
-        let mut voice = Voice {
-            sample_rate: 1000.0,
-            ..Voice::default()
-        };
-        voice.start(440.0, 0.0, 0.005);
-        let mut sounded = 0;
-        for _ in 0..20 {
-            if voice.next_sample().abs() > f32::EPSILON {
-                sounded += 1;
-            }
+    fn a_melody_note_sounds_an_octave_above_a_plain_square_wave() {
+        // 128 and 129 open the tune. The two counters interleave, so the
+        // speaker changes state every 128 iterations rather than every 256.
+        let mut voice = voice_at(192_000.0);
+        voice.start_chord(128, 129, 1.0);
+        let hz = measured_hz(&mut voice, 0.5);
+        assert!(
+            (hz - 488.0).abs() < 15.0,
+            "melody note measured {hz} Hz, expected about 488"
+        );
+        assert!((hz / frequency_of(128) - 2.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn the_opening_phrase_is_a_major_triad() {
+        // The Blue Danube opens on an arpeggio: a major third then a minor third.
+        let mut hz = Vec::new();
+        for pair in [(128u8, 129u8), (102, 103), (86, 87)] {
+            let mut voice = voice_at(192_000.0);
+            voice.start_chord(pair.0, pair.1, 1.0);
+            hz.push(measured_hz(&mut voice, 0.5));
         }
+        let major_third = hz[1] / hz[0];
+        let minor_third = hz[2] / hz[1];
+        assert!((major_third - 1.26).abs() < 0.03, "got {major_third}");
+        assert!((minor_third - 1.19).abs() < 0.03, "got {minor_third}");
+    }
+
+    #[test]
+    fn two_zero_bytes_are_a_rest() {
+        // Both counters reload at 256 and flip together, cancelling out.
+        let mut voice = voice_at(48_000.0);
+        voice.start_chord(0, 0, 1.0);
+        let hz = measured_hz(&mut voice, 0.25);
+        assert!(hz < 1.0, "the rest made a sound at {hz} Hz");
+    }
+
+    #[test]
+    fn a_sound_stops_when_its_duration_runs_out() {
+        let mut voice = voice_at(1000.0);
+        voice.start_note(4, 0.005);
+        let sounded = (0..20).filter(|_| voice.next_sample().abs() > 0.0).count();
         assert_eq!(sounded, 5);
     }
 }
