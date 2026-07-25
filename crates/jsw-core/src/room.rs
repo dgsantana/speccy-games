@@ -92,6 +92,9 @@ pub struct Room {
     /// The 32-byte name, as bytes: three of the 64 "rooms" hold code rather than
     /// a room, and their names are not text.
     pub name: [u8; 32],
+    /// The same name, trimmed and with anything unprintable as `?`, for
+    /// anything outside the game that wants to say which room this is.
+    pub title: String,
     /// Two bits a cell, sixteen rows of thirty-two.
     pub layout: [u8; CELLS],
     pub tiles: [Tile; 6],
@@ -143,6 +146,7 @@ impl Room {
 
         Self {
             number,
+            title: title_of(&name),
             name,
             layout,
             tiles,
@@ -158,17 +162,6 @@ impl Room {
             },
             entities,
         }
-    }
-
-    /// The name with the padding taken off, for anything that wants to print it
-    /// outside the game. Non-text bytes come back as `?`.
-    pub fn name_text(&self) -> String {
-        self.name
-            .iter()
-            .map(|&b| if (32..127).contains(&b) { b as char } else { '?' })
-            .collect::<String>()
-            .trim()
-            .to_owned()
     }
 
     /// What is at a cell, taking the ramp and conveyor into account.
@@ -241,6 +234,16 @@ impl Room {
     }
 }
 
+/// A room name with the padding taken off. Non-text bytes come back as `?`,
+/// because three of the 64 rooms hold code rather than a room.
+fn title_of(name: &[u8; 32]) -> String {
+    name.iter()
+        .map(|&b| if (32..127).contains(&b) { b as char } else { '?' })
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
 /// Read a conveyor or ramp definition: direction, address, length.
 fn run(bytes: &[u8; 256], at: usize) -> Run {
     Run {
@@ -270,7 +273,7 @@ mod tests {
     #[test]
     fn the_first_room_is_the_off_licence() {
         let room = Room::load(0);
-        assert_eq!(room.name_text(), "The Off Licence");
+        assert_eq!(room.title, "The Off Licence");
     }
 
     #[test]
@@ -287,7 +290,7 @@ mod tests {
     fn the_off_licence_leads_left_to_the_bridge() {
         let room = Room::load(0);
         assert_eq!(room.exits.left, 1);
-        assert_eq!(Room::load(1).name_text(), "The Bridge");
+        assert_eq!(Room::load(1).title, "The Bridge");
         // It has no exit the other three ways, which the original spells as
         // "back to room 0".
         assert_eq!(room.exits.right, 0);

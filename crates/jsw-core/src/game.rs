@@ -195,7 +195,9 @@ impl Game {
     fn sync_debug(&mut self) {}
 
     /// Enter a room directly, for looking at one without walking there.
-    #[cfg(feature = "debug")]
+    ///
+    /// Not a cheat in itself — the room dumper uses it too — so it is always
+    /// available. What the `debug` feature adds is a key bound to it.
     pub fn goto_room(&mut self, number: usize) {
         self.enter_room(number % jsw_data::ROOM_COUNT);
         self.willy = Willy::default();
@@ -210,7 +212,7 @@ mod tests {
     fn a_new_game_starts_in_the_bathroom() {
         let game = Game::new();
         assert_eq!(game.room.number, START_ROOM);
-        assert_eq!(game.room.name_text(), "The Bathroom");
+        assert_eq!(game.room.title, "The Bathroom");
     }
 
     #[test]

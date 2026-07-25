@@ -50,8 +50,6 @@ impl speccy::DebugSwitches for Game {
     }
 
     fn level_name(&self) -> &str {
-        // The name is bytes, and three of the 64 rooms hold code rather than
-        // text, so this is the room number's stand-in until 2c prints properly.
-        "room"
+        &self.room.title
     }
 }
