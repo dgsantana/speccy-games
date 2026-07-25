@@ -13,7 +13,7 @@ repository = "https://github.com/dgsantana/manic-miner-rs"
 mm-audio = { path = "crates/mm-audio" }
 mm-core = { path = "crates/mm-core" }
 mm-data = { path = "crates/mm-data" }
-cpal = "0.15"
+cpal = "0.18"
 macroquad = "0.4"
 
 [workspace.lints.rust]

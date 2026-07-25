@@ -25,6 +25,19 @@ const THEME_NOTES: usize = mm_data::music::THEME_TUNE.len();
 /// Characters of the scrolling message, which is longer than the screen is wide.
 const SCROLL_STEPS: usize = 292;
 
+/// How long a note lasts, per unit of its duration byte: `256` iterations of the
+/// original's sound loop at roughly 56 T-states on a 3.5 MHz Z80.
+const BEEP_UNIT_SECONDS: f32 = 0.004_125;
+
+/// Duration units elapsed per frame, in 1/256ths.
+///
+/// The theme tune runs far slower than the game does — a note lasts 206ms or
+/// 330ms against a 59ms frame — so notes cannot simply advance once per frame.
+/// This clock accumulates fractional units so the average tempo is exact and
+/// the error never compounds, which keeps the piano keys in step with the sound.
+const TUNE_UNITS_PER_FRAME: u32 =
+    (256.0 / (FRAMES_PER_SECOND * BEEP_UNIT_SECONDS)) as u32;
+
 /// What the game is currently doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -77,6 +90,8 @@ pub struct Game {
     item_attr: u8,
     /// Edge detection so a held key does not repeat.
     prev_input: Input,
+    /// Title-tune position, in 1/256ths of a duration unit into the current note.
+    tune_clock: u32,
 }
 
 impl Default for Game {
@@ -105,6 +120,7 @@ impl Game {
             note_index: 0,
             item_attr: 0,
             prev_input: Input::default(),
+            tune_clock: 0,
         };
         game.draw_title_screen();
         game
@@ -150,6 +166,7 @@ impl Game {
     //
 
     fn draw_title_screen(&mut self) {
+        self.tune_clock = 0;
         self.mem.fill(DISPLAY, DISPLAY_LEN, 0);
         self.mem.load(DISPLAY, &mm_data::title::TITLE_SCREEN_PIXELS);
         self.mem
@@ -174,19 +191,29 @@ impl Game {
 
         if note < THEME_NOTES {
             let [duration, low, high] = mm_data::music::THEME_TUNE[note];
-            // Light the two piano keys this note plays, and unlight the previous pair.
-            if note > 0 {
-                let [_, prev_low, prev_high] = mm_data::music::THEME_TUNE[note - 1];
-                self.mem.write(piano_key(prev_low), 56);
-                self.mem.write(piano_key(prev_high), 56);
+
+            // The clock always carries less than one frame of credit into a new
+            // note, so this is true on exactly the first frame of each one.
+            if self.tune_clock < TUNE_UNITS_PER_FRAME {
+                if note > 0 {
+                    let [_, prev_low, prev_high] = mm_data::music::THEME_TUNE[note - 1];
+                    self.mem.write(piano_key(prev_low), 56);
+                    self.mem.write(piano_key(prev_high), 56);
+                }
+                self.mem.write(piano_key(low), 80);
+                self.mem.write(piano_key(high), 40);
+                self.sounds.push(Sound::Chord { low, high, duration });
             }
-            self.mem.write(piano_key(low), 80);
-            self.mem.write(piano_key(high), 40);
-            self.sounds.push(Sound::Chord { low, high, duration });
-            self.mode = Mode::Title {
-                note: note + 1,
-                scroll,
-            };
+
+            self.tune_clock += TUNE_UNITS_PER_FRAME;
+            let note_length = u32::from(duration) * 256;
+            if self.tune_clock >= note_length {
+                self.tune_clock -= note_length;
+                self.mode = Mode::Title {
+                    note: note + 1,
+                    scroll,
+                };
+            }
             return;
         }
 
@@ -322,8 +349,9 @@ impl Game {
         if self.music_on {
             self.note_index = self.note_index.wrapping_add(1);
             let index = rot_r(self.note_index & 126, 1) as usize;
-            self.sounds
-                .note(mm_data::music::GAME_TUNE[index % 64], 32);
+            // The original produced this with C=3, a 12ms blip once a frame,
+            // which is why the in-game tune chirps rather than sings.
+            self.sounds.note(mm_data::music::GAME_TUNE[index % 64], 3);
         }
     }
 
@@ -547,6 +575,36 @@ fn piano_key(frequency: u8) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_theme_tune_runs_at_the_original_tempo() {
+        let mut game = Game::new();
+        let mut frames = 0u32;
+        let mut notes_heard = 0;
+        loop {
+            game.update(Input::default());
+            notes_heard += game.sounds.drain().count();
+            frames += 1;
+            if !matches!(game.mode, Mode::Title { note, .. } if note < THEME_NOTES) {
+                break;
+            }
+            assert!(frames < 10_000, "the tune never finished");
+        }
+
+        assert_eq!(notes_heard, THEME_NOTES, "a note was played twice or skipped");
+
+        // The Blue Danube should take about twenty seconds, not four.
+        let seconds = frames as f32 / FRAMES_PER_SECOND;
+        let expected: f32 = mm_data::music::THEME_TUNE
+            .iter()
+            .map(|note| f32::from(note[0]) * BEEP_UNIT_SECONDS)
+            .sum();
+        assert!(expected > 15.0, "expected tune length was {expected}s");
+        assert!(
+            (seconds - expected).abs() < 0.5,
+            "tune took {seconds}s, expected {expected}s"
+        );
+    }
 
     #[test]
     fn a_new_game_starts_on_the_title_screen() {

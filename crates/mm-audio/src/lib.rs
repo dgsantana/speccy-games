@@ -1,9 +1,21 @@
 //! A square-wave beeper, the way the Spectrum made every sound it ever made.
 //!
-//! The engine emits [`Sound`] values holding the original's pitch and duration
-//! bytes. A pitch byte is a delay-loop counter, so frequency is inversely
-//! proportional to it; [`PITCH_SCALE`] is the constant that turns one into the
-//! other, chosen so the title tune lands in the register it does on real hardware.
+//! Both constants below come from counting T-states in the original's sound
+//! loop at 37596, which runs `256 * duration` iterations of roughly 56 T-states
+//! each on a 3.5 MHz Z80:
+//!
+//! ```text
+//! OUT (254),A   11      one iteration is about 56 T-states, so 16.1 us
+//! DEC D          4      D counts down and reloads, flipping the speaker
+//! JR NZ         12      every D iterations: a full cycle is 2*D iterations
+//! DEC E          4      E does the same independently, which is why a note
+//! JR NZ         12      can light two piano keys
+//! DJNZ          13      the inner loop runs 256 times per duration unit
+//! ```
+//!
+//! A full cycle at parameter `F` therefore takes `2 * F * 16.1 us`, giving
+//! [`PITCH_SCALE`] divided by `F` hertz, and one unit of duration lasts
+//! `256 * 56 / 3_500_000` seconds, which is [`BEEP_UNIT`].
 //!
 //! If no audio device is available the beeper silently does nothing, because a
 //! missing sound card should not stop anyone playing.
@@ -14,13 +26,11 @@ use std::sync::{Arc, Mutex};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use mm_core::Sound;
 
-/// Frequency of a note is `PITCH_SCALE / pitch`.
-pub const PITCH_SCALE: f32 = 56_320.0;
+/// Frequency of a note is `PITCH_SCALE / pitch`, in hertz.
+pub const PITCH_SCALE: f32 = 31_037.0;
 
-/// Seconds per unit of duration for a sound effect.
-const EFFECT_UNIT: f32 = 0.000_6;
-/// Seconds per unit of duration for a title-tune note.
-const TUNE_UNIT: f32 = 0.004;
+/// Seconds in one unit of a duration byte.
+pub const BEEP_UNIT: f32 = 0.004_125;
 /// How long the beeper spends on each half of a chord before swapping.
 const CHORD_SWAP: f32 = 0.001_5;
 /// Peak amplitude. The Spectrum's speaker was not subtle, but our ears are.
@@ -120,7 +130,7 @@ impl Beeper {
         };
         match sound {
             Sound::Note { pitch, duration } => {
-                voice.start(frequency_of(pitch), 0.0, f32::from(duration) * EFFECT_UNIT);
+                voice.start(frequency_of(pitch), 0.0, f32::from(duration) * BEEP_UNIT);
             }
             Sound::Chord {
                 low,
@@ -130,7 +140,7 @@ impl Beeper {
                 voice.start(
                     frequency_of(low),
                     frequency_of(high),
-                    f32::from(duration) * TUNE_UNIT,
+                    f32::from(duration) * BEEP_UNIT,
                 );
             }
             Sound::Silence => voice.silence(),
@@ -150,7 +160,7 @@ pub fn frequency_of(pitch: u8) -> f32 {
 fn build_stream(voice: &Arc<Mutex<Voice>>) -> Option<cpal::Stream> {
     let device = cpal::default_host().default_output_device()?;
     let config = device.default_output_config().ok()?;
-    let sample_rate = config.sample_rate().0 as f32;
+    let sample_rate = config.sample_rate() as f32;
     let channels = config.channels() as usize;
 
     voice.lock().ok()?.sample_rate = sample_rate;
@@ -158,9 +168,11 @@ fn build_stream(voice: &Arc<Mutex<Voice>>) -> Option<cpal::Stream> {
     let voice = Arc::clone(voice);
     let on_error = |err| eprintln!("audio stream error: {err}");
 
-    let stream = match config.sample_format() {
+    let format = config.sample_format();
+    let config: cpal::StreamConfig = config.into();
+    let stream = match format {
         cpal::SampleFormat::F32 => device.build_output_stream(
-            &config.into(),
+            config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 fill(&voice, data, channels);
             },
@@ -168,7 +180,7 @@ fn build_stream(voice: &Arc<Mutex<Voice>>) -> Option<cpal::Stream> {
             None,
         ),
         cpal::SampleFormat::I16 => device.build_output_stream(
-            &config.into(),
+            config,
             move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                 let mut scratch = vec![0.0f32; data.len()];
                 fill(&voice, &mut scratch, channels);
@@ -211,9 +223,18 @@ mod tests {
 
     #[test]
     fn the_title_tune_lands_in_a_musical_register() {
-        // The Blue Danube's opening note and the lowest note it reaches.
-        assert!((frequency_of(128) - 440.0).abs() < 1.0);
-        assert!(frequency_of(203) > 200.0 && frequency_of(43) < 1500.0);
+        // The tune spans roughly B3 to F5, which is where a beeper sounds like
+        // music rather than like a smoke alarm.
+        assert!((frequency_of(128) - 242.0).abs() < 2.0);
+        assert!(frequency_of(203) > 140.0);
+        assert!(frequency_of(43) < 750.0);
+    }
+
+    #[test]
+    fn note_lengths_match_the_original_loop() {
+        // The two durations the theme tune uses, in milliseconds.
+        assert!((80.0 * BEEP_UNIT - 0.330).abs() < 0.005);
+        assert!((50.0 * BEEP_UNIT - 0.206).abs() < 0.005);
     }
 
     #[test]
