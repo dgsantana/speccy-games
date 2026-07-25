@@ -142,7 +142,7 @@ impl Game {
 
     fn draw_willy(&mut self) {
         let (row, column) = self.willy.position();
-        if row + 2 > ROWS || column + 1 >= COLUMNS {
+        if column + 1 >= COLUMNS {
             return;
         }
 
@@ -161,12 +161,15 @@ impl Game {
             }
             let at = SCREEN_BUF + cell_offset(y / 8, y % 8, column) as u16;
             self.mem.write(at, self.mem.read(at) | pair[0]);
-            self.mem
-                .write(at + 1, self.mem.read(at + 1) | pair[1]);
+            self.mem.write(at + 1, self.mem.read(at + 1) | pair[1]);
         }
 
-        // Bright white, as the original colours him.
-        for cell_row in row..(row + 2).min(ROWS) {
+        // Sixteen pixels starting part way down a cell cover three rows of
+        // cells, not two. Colouring only two leaves his legs drawn in the
+        // background's ink, which is usually black on black: he appears to be
+        // cut in half every time he steps off a cell boundary.
+        let rows_covered = if pixel_offset > 0 { 3 } else { 2 };
+        for cell_row in row..(row + rows_covered).min(ROWS) {
             for cell_column in column..(column + 2).min(COLUMNS) {
                 self.mem
                     .write(ATTR_BUF + (cell_row * COLUMNS + cell_column) as u16, 71);
@@ -255,6 +258,26 @@ mod tests {
                 game.update(speccy::Input::default());
                 game.sounds.clear();
             }
+        }
+    }
+
+    #[test]
+    fn a_sprite_straddling_a_boundary_is_coloured_over_three_rows() {
+        let mut game = Game::new();
+        // Half a cell down: his sixteen pixels now cover rows 5, 6 and 7.
+        game.willy = Willy {
+            y: 5 * willy::ROW_UNITS + 8,
+            cell: ATTR_BUF + 5 * COLUMNS as u16 + 10,
+            ..Willy::default()
+        };
+        game.draw_willy();
+
+        for row in 5..=7 {
+            assert_eq!(
+                game.mem.read(ATTR_BUF + (row * COLUMNS + 10) as u16),
+                71,
+                "row {row} of his sprite was left in the background's colour"
+            );
         }
     }
 

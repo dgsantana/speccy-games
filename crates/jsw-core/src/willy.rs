@@ -111,14 +111,20 @@ impl Willy {
 
     /// Advance one frame: gravity first, then the keys.
     pub fn update(&mut self, room: &Room, mem: &mut speccy::Memory, input: Input) -> Outcome {
+        // Counters 13 and 16 are the points on the way down where his sprite is
+        // exactly two and one cell-heights above where the jump started, so
+        // they are cell-aligned and worth testing for ground. Without them he
+        // sails through every platform until the jump runs out.
+        let mut check_ground = matches!(self.jump_counter, 13 | 16) || self.airborne != 1;
         if self.airborne == 1 {
             match self.rise_or_fall_through_jump(room, mem) {
                 Outcome::None => {}
                 other => return other,
             }
+            check_ground = matches!(self.jump_counter, 13 | 16) || self.airborne != 1;
         }
 
-        if self.airborne != 1 {
+        if check_ground {
             match self.settle(room, mem) {
                 Outcome::None => {}
                 other => return other,
@@ -314,27 +320,37 @@ impl Willy {
     }
 
     /// Whether the next cell along takes him up a ramp, down one, or neither.
+    ///
+    /// The original picks one cell to look at, and which one depends on both the
+    /// way Willy is going and the way the ramp climbs. Moving left it is the
+    /// cell 31 on from his own (one row down, one column left) for a ramp that
+    /// climbs left, or 65 on (two rows down, one column right) for one that
+    /// climbs right. Moving right it is 64 on (two rows down) or 34 on (one row
+    /// down, two columns right). Finding the ramp tile there is what makes him
+    /// step up or down instead of along.
     fn ramp_step(&self, room: &Room, mem: &speccy::Memory, rightwards: bool) -> Climb {
+        // Mid-jump there is no ramp following; the original skips this entirely.
         if self.airborne != 0 {
             return Climb::Level;
         }
         let (row, column) = self.position();
         let ramp = room.tile(Kind::Ramp).attr;
-        let up_to_the_right = room.ramp.direction != 0;
+        let climbs_right = room.ramp.direction != 0;
 
-        // Climbing: the cell diagonally ahead and above holds ramp.
-        if rightwards == up_to_the_right {
-            let ahead = if rightwards { column + 2 } else { column.wrapping_sub(1) };
-            if row + 1 < ROWS && cell_attr(mem, row + 1, ahead) == ramp {
-                return Climb::Up;
-            }
+        let (probe, climb) = match (rightwards, climbs_right) {
+            // Walking into the foot of the ramp: he goes up.
+            (false, false) => ((row + 1, column.wrapping_sub(1)), Climb::Up),
+            (true, true) => ((row + 1, column + 2), Climb::Up),
+            // Walking off the top of it: he goes down.
+            (false, true) => ((row + 2, column + 1), Climb::Down),
+            (true, false) => ((row + 2, column), Climb::Down),
+        };
+
+        if probe.0 < ROWS && probe.1 < COLUMNS && cell_attr(mem, probe.0, probe.1) == ramp {
+            climb
+        } else {
+            Climb::Level
         }
-        // Descending: the ramp continues below and ahead.
-        let ahead = if rightwards { column + 2 } else { column.wrapping_sub(1) };
-        if row + 2 < ROWS && cell_attr(mem, row + 2, ahead) == ramp {
-            return Climb::Down;
-        }
-        Climb::Level
     }
 
     /// Put him where the original puts him when he arrives from another room.
@@ -503,6 +519,87 @@ mod tests {
         let mut willy = Willy::default();
         willy.enter_from(Outcome::Right);
         assert_eq!(willy.position().1, 0);
+    }
+
+    #[test]
+    fn a_jump_can_land_on_a_higher_ledge() {
+        // A floor along the left half at row 8, and a ledge two rows higher
+        // along the right half. Willy stands on the floor and jumps right; he
+        // has to come down on the ledge rather than sail through it.
+        let room = Room::load(0);
+        let mut mem = Memory::new();
+        let floor = room.tile(Kind::Floor).attr;
+        let background = room.tile(Kind::Background).attr;
+        for cell in 0..(ROWS * COLUMNS) {
+            mem.write(ATTR_BUF + cell as u16, background);
+        }
+        for column in 0..16 {
+            mem.write(ATTR_BUF + (8 * COLUMNS + column) as u16, floor);
+        }
+        for column in 16..COLUMNS {
+            mem.write(ATTR_BUF + (6 * COLUMNS + column) as u16, floor);
+        }
+
+        let mut willy = Willy {
+            y: 6 * ROW_UNITS,
+            cell: ATTR_BUF + 6 * COLUMNS as u16 + 13,
+            flags: facing::MOVING,
+            frame: 3,
+            ..Willy::default()
+        };
+        let go_right = Input {
+            right: true,
+            ..Input::default()
+        };
+        willy.update(
+            &room,
+            &mut mem,
+            Input {
+                right: true,
+                jump: true,
+                ..Input::default()
+            },
+        );
+        for _ in 0..JUMP_FRAMES + 8 {
+            willy.update(&room, &mut mem, go_right);
+        }
+
+        assert_eq!(willy.airborne, 0, "he never landed");
+        assert_eq!(
+            willy.position().0,
+            4,
+            "he should be standing on the ledge at row 4, feet on row 6"
+        );
+    }
+
+    #[test]
+    fn walking_into_a_ramp_climbs_it() {
+        // The Off Licence's ramp climbs to the right from (14,23).
+        let (room, mut mem) = staged(0);
+        assert_eq!(room.ramp.direction, 1);
+
+        let mut willy = Willy {
+            y: 13 * ROW_UNITS,
+            cell: ATTR_BUF + 13 * COLUMNS as u16 + 21,
+            flags: facing::MOVING,
+            frame: 3,
+            ..Willy::default()
+        };
+        let go_right = Input {
+            right: true,
+            ..Input::default()
+        };
+
+        let start_row = willy.position().0;
+        for _ in 0..12 {
+            willy.update(&room, &mut mem, go_right);
+        }
+        assert!(
+            willy.position().0 < start_row,
+            "he walked past the ramp instead of up it: row {} -> {}",
+            start_row,
+            willy.position().0
+        );
     }
 
     #[test]
