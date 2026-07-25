@@ -1,0 +1,17 @@
+[package]
+name = "jsw-core"
+description = "Jet Set Willy game engine, independent of any window or audio backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+debug = ["speccy/debug"]
+
+[dependencies]
+jsw-data.workspace = true
+speccy.workspace = true
+
+[lints]
+workspace = true

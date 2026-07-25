@@ -1,15 +1,24 @@
 [workspace]
 resolver = "3"
-members = ["crates/mm-core", "crates/mm-data", "crates/speccy", "crates/speccy-audio"]
+members = [
+    "crates/jsw-core",
+    "crates/jsw-data",
+    "crates/mm-core",
+    "crates/mm-data",
+    "crates/speccy",
+    "crates/speccy-audio",
+]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/dgsantana/manic-miner-rs"
+repository = "https://github.com/dgsantana/speccy-games"
 
 [workspace.dependencies]
+jsw-core = { path = "crates/jsw-core" }
+jsw-data = { path = "crates/jsw-data" }
 mm-core = { path = "crates/mm-core" }
 mm-data = { path = "crates/mm-data" }
 speccy = { path = "crates/speccy" }
@@ -57,12 +66,13 @@ repository.workspace = true
 [features]
 # Enables the debug switches. They still stay off until the binary is run
 # with --debug.
-debug = ["mm-core/debug", "speccy/debug"]
+debug = ["jsw-core/debug", "mm-core/debug", "speccy/debug"]
 
 [dependencies]
 macroquad.workspace = true
 speccy.workspace = true
 speccy-audio.workspace = true
+jsw-core.workspace = true
 mm-core.workspace = true
 
 [lints]

@@ -1,0 +1,12 @@
+[package]
+name = "jsw-data"
+description = "Jet Set Willy byte tables, generated from the published disassembly"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

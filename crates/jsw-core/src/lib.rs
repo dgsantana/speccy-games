@@ -1,0 +1,13 @@
+//! The Jet Set Willy engine.
+//!
+//! Willy has to tidy the mansion before Maria will let him go to bed. Sixty-odd
+//! rooms of it, each carrying its own tile graphics, joined at their edges.
+//!
+//! Like [`mm_core`](https://docs.rs/mm-core), everything here is independent of
+//! any window, GPU or audio device: the machine is [`speccy`], and this crate is
+//! only what Software Projects wrote.
+
+pub mod room;
+
+pub use jsw_data::ROOM_COUNT;
+pub use room::Room;

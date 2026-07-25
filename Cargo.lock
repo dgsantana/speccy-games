@@ -359,6 +359,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsw-core"
+version = "0.1.0"
+dependencies = [
+ "jsw-data",
+ "speccy",
+]
+
+[[package]]
+name = "jsw-data"
+version = "0.1.0"
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -409,6 +421,7 @@ dependencies = [
 name = "manic-miner-rs"
 version = "0.1.0"
 dependencies = [
+ "jsw-core",
  "macroquad",
  "mm-core",
  "speccy",

@@ -23,6 +23,7 @@ pub mod debug;
 pub mod display;
 pub mod font;
 pub mod input;
+pub mod layout;
 pub mod memory;
 pub mod sound;
 
@@ -32,5 +33,6 @@ pub use debug::{Debug, DebugSwitches};
 pub use display::{Attribute, Frame, PALETTE};
 pub use font::FONT;
 pub use input::Input;
+pub use layout::{ATTR_BACK, ATTR_BUF, PLAY_ATTRS, PLAY_PIXELS, SCREEN_BACK, SCREEN_BUF};
 pub use memory::{HEIGHT, Memory, WIDTH};
 pub use sound::{Sound, SoundQueue};
