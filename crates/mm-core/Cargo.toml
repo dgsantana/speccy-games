@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Developer switches: cavern jumping, guardians, air and lives. Off by default;
+# a build without it contains none of the code.
+debug = []
+
 [dependencies]
 mm-data.workspace = true
 

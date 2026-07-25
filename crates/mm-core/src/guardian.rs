@@ -59,6 +59,9 @@ pub struct Guardians {
     pub horizontal: [Horizontal; 4],
     pub vertical: [Vertical; 4],
     pub sprites: [u8; 256],
+    /// Debug switch: hold every guardian still and harmless.
+    #[cfg(feature = "debug")]
+    pub disabled: bool,
 }
 
 impl Guardians {
@@ -94,12 +97,31 @@ impl Guardians {
             horizontal,
             vertical,
             sprites: guardians::SPRITES[sheet],
+            #[cfg(feature = "debug")]
+            disabled: false,
+        }
+    }
+
+    /// Whether the guardians are running. Always true unless the `debug`
+    /// feature is on and they have been switched off.
+    #[inline]
+    pub fn active(&self) -> bool {
+        #[cfg(feature = "debug")]
+        {
+            !self.disabled
+        }
+        #[cfg(not(feature = "debug"))]
+        {
+            true
         }
     }
 
     /// Step every horizontal guardian. The original stopped at the first empty
     /// slot, and so does this.
     pub fn move_horizontal(&mut self, cavern: &Cavern) {
+        if !self.active() {
+            return;
+        }
         for guardian in &mut self.horizontal {
             if guardian.is_empty() {
                 break;
@@ -110,6 +132,9 @@ impl Guardians {
 
     /// Draw every horizontal guardian. Returns true if one of them touched Willy.
     pub fn draw_horizontal(&self, cavern: &Cavern, mem: &mut Memory) -> bool {
+        if !self.active() {
+            return false;
+        }
         for guardian in &self.horizontal {
             if guardian.is_empty() {
                 continue;
@@ -123,6 +148,9 @@ impl Guardians {
 
     /// Step and draw every vertical guardian. Returns true if one touched Willy.
     pub fn update_vertical(&mut self, cavern: &Cavern, mem: &mut Memory) -> bool {
+        if !self.active() {
+            return false;
+        }
         for slot in 0..self.vertical.len() {
             if self.vertical[slot].is_empty() {
                 continue;

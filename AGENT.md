@@ -63,6 +63,20 @@ cargo clippy --workspace --all-targets   # must be clean
 cargo run --release                      # play it
 ```
 
+The `debug` feature adds code and tests of its own, and both shapes have to
+pass:
+
+```bash
+cargo test -p mm-core --features debug
+cargo clippy --workspace --all-targets --features debug
+cargo run --features debug -- --debug    # F1-F5, see README
+```
+
+Anything reading a debug switch does so through the `invulnerable`,
+`air_drains`, `guardians_live` and `sync_debug` helpers in `game.rs`, which fold
+to constants when the feature is off. Put the `cfg` there rather than in the
+game loop.
+
 To look at what the engine draws without opening a window:
 
 ```bash

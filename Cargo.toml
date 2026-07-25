@@ -53,6 +53,11 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Enables the debug switches. They still stay off until the binary is run
+# with --debug.
+debug = ["mm-core/debug"]
+
 [dependencies]
 macroquad.workspace = true
 mm-audio.workspace = true

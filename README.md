@@ -23,6 +23,30 @@ cargo run --release
 | M | Music on or off |
 | Q or Escape | Quit |
 
+## Debug mode
+
+For looking at a cavern without playing up to it. It is behind two locks: a
+cargo feature that decides whether the code is compiled at all, and a flag that
+decides whether a build that has it does anything. A normal build has none of
+it in the binary.
+
+```bash
+cargo run --features debug -- --debug
+```
+
+| Key | Action |
+| --- | --- |
+| F1 / F2 | Next / previous cavern |
+| F3 | Guardians on or off |
+| F4 | Lives on or off |
+| F5 | Air drain on or off |
+
+The keys act during play only, and nothing is drawn on the Spectrum screen —
+each toggle prints a line to the terminal instead. Jumping to a cavern leaves
+the score and lives alone, so it shows you the cavern rather than resuming a
+game there. Eugene and Kong keep moving with the guardians switched off, since
+their caverns cannot be finished otherwise; they just cannot kill you.
+
 ## How it is put together
 
 Four crates. The engine knows nothing about windows, so it can be tested without

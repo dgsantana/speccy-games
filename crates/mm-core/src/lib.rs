@@ -14,6 +14,8 @@
 //! ```
 
 pub mod cavern;
+#[cfg(feature = "debug")]
+pub mod debug;
 pub mod display;
 pub mod game;
 pub mod guardian;
@@ -25,9 +27,12 @@ pub mod speccy;
 pub mod willy;
 
 pub use cavern::Cavern;
+#[cfg(feature = "debug")]
+pub use debug::Debug;
 pub use display::{Attribute, Frame, PALETTE};
 pub use game::{FRAMES_PER_SECOND, Game, Mode};
 pub use input::Input;
+pub use mm_data::CAVERN_COUNT;
 pub use sound::{Sound, SoundQueue};
 pub use speccy::{HEIGHT, WIDTH};
 pub use willy::Willy;

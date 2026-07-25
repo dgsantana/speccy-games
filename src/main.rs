@@ -4,6 +4,8 @@
 //! reads the keyboard, ticks the engine at the Spectrum's 17 frames per second,
 //! and blits the resulting 256x192 screen scaled up to the window.
 
+mod debug;
+
 use macroquad::prelude::*;
 use mm_audio::Beeper;
 use mm_core::{FRAMES_PER_SECOND, Frame, Game, HEIGHT, Input, PALETTE, WIDTH};
@@ -23,6 +25,7 @@ fn window() -> Conf {
 
 #[macroquad::main(window)]
 async fn main() {
+    let debug_keys = debug::enabled();
     let mut game = Game::new();
     let mut frame = Frame::new();
     let beeper = Beeper::new();
@@ -37,6 +40,10 @@ async fn main() {
 
     while !game.quit {
         let delta = get_frame_time().min(0.25);
+
+        if debug_keys {
+            debug::read_keys(&mut game);
+        }
 
         flash_timer += delta;
         if flash_timer >= FLASH_PERIOD {

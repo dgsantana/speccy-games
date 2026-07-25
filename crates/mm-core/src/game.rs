@@ -75,6 +75,9 @@ pub struct Game {
     pub mode: Mode,
     /// Cheat mode: lives are never lost and the boot is shown.
     pub cheat: bool,
+    /// Developer switches. Only exists with the `debug` feature.
+    #[cfg(feature = "debug")]
+    pub debug: crate::debug::Debug,
     /// Cavern to start in, for the original's teleport cheat.
     pub start_cavern: usize,
     /// In-game tune on or off.
@@ -112,6 +115,8 @@ impl Game {
             sounds: SoundQueue::default(),
             mode: Mode::Title { note: 0, scroll: 0 },
             cheat: false,
+            #[cfg(feature = "debug")]
+            debug: crate::debug::Debug::default(),
             start_cavern: 0,
             music_on: true,
             paused: false,
@@ -132,6 +137,82 @@ impl Game {
             Mode::Title { .. } | Mode::Dying { .. } | Mode::GameOver { .. } => 0,
             Mode::Playing | Mode::Cleared { .. } => self.cavern.border,
         }
+    }
+
+    //
+    // Debug switches
+    //
+    // Each of these folds to a constant without the `debug` feature, so the
+    // engine compiles to what it compiled to before the switches existed.
+    //
+
+    /// Whether losing a life costs one.
+    #[inline]
+    fn invulnerable(&self) -> bool {
+        #[cfg(feature = "debug")]
+        {
+            self.cheat || self.debug.invulnerable
+        }
+        #[cfg(not(feature = "debug"))]
+        {
+            self.cheat
+        }
+    }
+
+    /// Whether the air is being burned.
+    // Reads nothing without the `debug` feature, which is the point.
+    #[allow(clippy::unused_self)]
+    #[inline]
+    fn air_drains(&self) -> bool {
+        #[cfg(feature = "debug")]
+        {
+            !self.debug.frozen_air
+        }
+        #[cfg(not(feature = "debug"))]
+        {
+            true
+        }
+    }
+
+    /// Whether a guardian can kill Willy. Eugene and Kong keep moving whatever
+    /// this says, because the caverns they are in cannot be finished otherwise.
+    // Reads nothing without the `debug` feature, which is the point.
+    #[allow(clippy::unused_self)]
+    #[inline]
+    fn guardians_live(&self) -> bool {
+        #[cfg(feature = "debug")]
+        {
+            !self.debug.no_guardians
+        }
+        #[cfg(not(feature = "debug"))]
+        {
+            true
+        }
+    }
+
+    /// Push the switches down into the parts that read them. Called every frame
+    /// because entering a cavern loads a fresh set of guardians.
+    // Reads nothing without the `debug` feature, which is the point.
+    #[allow(clippy::unused_self)]
+    #[inline]
+    fn sync_debug(&mut self) {
+        #[cfg(feature = "debug")]
+        {
+            self.guardians.disabled = self.debug.no_guardians;
+        }
+    }
+
+    /// Enter a cavern directly, for looking at one without playing up to it.
+    ///
+    /// The score, lives and high score are left alone, so this resumes nothing:
+    /// it puts Willy at the start of `sheet` with a full air supply. Sheets
+    /// outside the twenty wrap around.
+    #[cfg(feature = "debug")]
+    pub fn goto_cavern(&mut self, sheet: usize) {
+        if self.mode != Mode::Playing {
+            return;
+        }
+        self.enter_cavern(sheet % mm_data::CAVERN_COUNT);
     }
 
     /// Advance one frame.
@@ -293,6 +374,7 @@ impl Game {
         if self.paused {
             return;
         }
+        self.sync_debug();
 
         willy::draw_lives(&self.willy, &mut self.mem, self.note_index, self.cheat);
 
@@ -332,7 +414,7 @@ impl Game {
                 &mut self.sounds,
                 items_remaining,
             );
-            if died {
+            if died && self.guardians_live() {
                 self.willy.kill();
             } else if self.check_portal() {
                 self.mode = Mode::Cleared {
@@ -344,7 +426,24 @@ impl Game {
 
         self.present();
 
-        let out_of_air = self.cavern.decrease_air(&mut self.mem);
+        // The clock inside `decrease_air` also drives guardian and conveyor
+        // timing, so a frozen air supply still has to tick it.
+        let out_of_air = if self.air_drains() {
+            self.cavern.decrease_air(&mut self.mem)
+        } else {
+            let held = self.cavern.air;
+            self.cavern.decrease_air(&mut self.mem);
+            if self.cavern.air != held {
+                // A unit was burned: the bar's new rightmost cell was drawn part
+                // full. Fill it in before winding the supply back, or the bar
+                // ends up with a notch in it.
+                for high in 82..86u8 {
+                    self.mem.write(addr_of(high, self.cavern.air), 255);
+                }
+                self.cavern.air = held;
+            }
+            false
+        };
         if out_of_air || self.willy.is_dead() {
             self.mode = Mode::Dying { ink: 71 };
             return;
@@ -459,7 +558,7 @@ impl Game {
             self.start_game_over();
             return;
         }
-        if !self.cheat {
+        if !self.invulnerable() {
             self.willy.lives -= 1;
         }
         let sheet = self.cavern.sheet;
@@ -665,6 +764,107 @@ mod tests {
             }
         }
         panic!("Willy never lost a life: mode {:?}", game.mode);
+    }
+
+    /// Start a game in `sheet` and run frames until Willy dies, up to `limit`.
+    /// Returns the frame he died on.
+    #[cfg(feature = "debug")]
+    fn frames_until_death(game: &mut Game, sheet: usize, limit: u32) -> Option<u32> {
+        game.start_cavern = sheet;
+        game.update(Input {
+            start: true,
+            ..Input::default()
+        });
+        for frame in 0..limit {
+            game.update(Input::default());
+            game.sounds.clear();
+            if matches!(game.mode, Mode::Dying { .. }) {
+                return Some(frame);
+            }
+        }
+        None
+    }
+
+    /// Cavern 2, where a guardian walks into a standing Willy quickly enough to
+    /// make a short test. Checked by `guardians_kill_without_the_switch`.
+    #[cfg(feature = "debug")]
+    const DEADLY_CAVERN: usize = 2;
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn guardians_kill_without_the_switch() {
+        let mut game = Game::new();
+        assert!(frames_until_death(&mut game, DEADLY_CAVERN, 200).is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn switching_the_guardians_off_keeps_willy_alive() {
+        let mut game = Game::new();
+        game.debug.no_guardians = true;
+        assert_eq!(frames_until_death(&mut game, DEADLY_CAVERN, 200), None);
+        assert_eq!(game.mode, Mode::Playing);
+    }
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn frozen_air_never_runs_out() {
+        let mut game = Game::new();
+        game.debug.frozen_air = true;
+        game.debug.no_guardians = true;
+        game.update(Input {
+            start: true,
+            ..Input::default()
+        });
+        game.cavern.air = 37;
+        for _ in 0..400 {
+            game.update(Input::default());
+            game.sounds.clear();
+        }
+        assert_eq!(game.mode, Mode::Playing);
+        assert_eq!(game.cavern.air, 37);
+        assert_eq!(game.willy.lives, 3);
+    }
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn invulnerability_costs_no_lives_but_willy_still_dies() {
+        let mut game = Game::new();
+        game.debug.invulnerable = true;
+        assert!(frames_until_death(&mut game, DEADLY_CAVERN, 200).is_some());
+        // Run out the death sequence and back into the cavern.
+        for _ in 0..40 {
+            game.update(Input::default());
+            game.sounds.clear();
+        }
+        assert_eq!(game.mode, Mode::Playing);
+        assert_eq!(game.willy.lives, 3);
+    }
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn goto_cavern_loads_the_sheet_and_wraps() {
+        let mut game = Game::new();
+        game.update(Input {
+            start: true,
+            ..Input::default()
+        });
+
+        game.goto_cavern(3);
+        assert_eq!(game.cavern.sheet, 3);
+        assert_eq!(game.cavern.name.trim(), "Abandoned Uranium Workings");
+
+        game.goto_cavern(mm_data::CAVERN_COUNT);
+        assert_eq!(game.cavern.sheet, 0);
+    }
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn goto_cavern_does_nothing_on_the_title_screen() {
+        let mut game = Game::new();
+        game.goto_cavern(5);
+        assert!(matches!(game.mode, Mode::Title { .. }));
+        assert_eq!(game.cavern.sheet, 0);
     }
 
     #[test]

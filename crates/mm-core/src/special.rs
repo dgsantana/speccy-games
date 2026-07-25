@@ -111,6 +111,9 @@ fn draw_eugene(
 
 /// Skylabs fall to a crash site, disintegrate, and reappear eight columns along.
 fn update_skylabs(guardians: &mut Guardians, cavern: &Cavern, mem: &mut Memory) -> bool {
+    if !guardians.active() {
+        return false;
+    }
     for slot in 0..guardians.vertical.len() {
         if guardians.vertical[slot].is_empty() {
             return false;
