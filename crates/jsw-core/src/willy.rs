@@ -68,11 +68,17 @@ pub struct Willy {
     pub jump_counter: u8,
 }
 
+/// Where a new game puts him: (13,20) in The Bathroom, with y=208, which is
+/// what the original writes at 34789 and 34799.
+pub const START_ROW: usize = 13;
+pub const START_COLUMN: usize = 20;
+pub const START_Y: u8 = 208;
+
 impl Default for Willy {
     fn default() -> Self {
         Self {
-            y: 208,
-            cell: ATTR_BUF + 13 * COLUMNS as u16 + 15,
+            y: START_Y,
+            cell: ATTR_BUF + (START_ROW * COLUMNS + START_COLUMN) as u16,
             flags: 0,
             frame: 0,
             airborne: 0,
@@ -419,6 +425,52 @@ mod tests {
         room.draw(&mut mem);
         mem.copy(ATTR_BACK, ATTR_BUF, PLAY_ATTRS);
         (room, mem)
+    }
+
+    #[test]
+    fn a_new_willy_stands_where_the_original_puts_him() {
+        // The original writes y=208 at 34789 and the attribute-buffer address
+        // 23988, which is (13,20), at 34799.
+        let willy = Willy::default();
+        assert_eq!(willy.y, 208);
+        assert_eq!(willy.position(), (13, 20));
+        assert_eq!(willy.cell, 23988);
+    }
+
+    #[test]
+    fn a_ramp_is_climbed_a_whole_cell_at_a_time() {
+        // The Bathroom's ramp climbs up-right from (12,9). Walking it must move
+        // him one cell up per cell along, not a pixel at a time.
+        let (room, mut mem) = staged(33);
+        let mut willy = Willy {
+            y: 10 * ROW_UNITS,
+            cell: ATTR_BUF + 10 * COLUMNS as u16 + 8,
+            flags: facing::MOVING,
+            frame: 3,
+            ..Willy::default()
+        };
+        let go_right = Input {
+            right: true,
+            ..Input::default()
+        };
+
+        let mut heights = vec![willy.y];
+        for _ in 0..12 {
+            willy.update(&room, &mut mem, go_right);
+            if *heights.last().expect("seeded") != willy.y {
+                heights.push(willy.y);
+            }
+        }
+        // Every change of height is exactly one cell.
+        for pair in heights.windows(2) {
+            assert_eq!(
+                pair[0] - pair[1],
+                ROW_UNITS,
+                "he changed height by {} units, not a whole cell",
+                pair[0] - pair[1]
+            );
+        }
+        assert!(heights.len() > 2, "he never climbed: {heights:?}");
     }
 
     #[test]
