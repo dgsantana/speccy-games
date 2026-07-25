@@ -44,6 +44,10 @@ pub struct Game {
     pub mem: Memory,
     pub room: Room,
     pub willy: Willy,
+    /// Willy as he was on entering this room. The original saves these seven
+    /// bytes at 35146 and puts them back when he dies, which is why dying
+    /// returns him to the doorway rather than to where the game began.
+    willy_on_entry: Willy,
     pub entities: Entities,
     pub lives: u8,
     pub mode: Mode,
@@ -70,6 +74,7 @@ impl Game {
             mem: Memory::new(),
             room: Room::load(START_ROOM),
             willy: Willy::default(),
+            willy_on_entry: Willy::default(),
             entities: Entities::default(),
             lives: STARTING_LIVES,
             mode: Mode::Playing,
@@ -93,6 +98,7 @@ impl Game {
     fn enter_room(&mut self, number: usize) {
         self.room = Room::load(number % jsw_data::ROOM_COUNT);
         self.entities = Entities::load(&self.room);
+        self.willy_on_entry = self.willy;
         self.mem.fill(SCREEN_BACK, PLAY_PIXELS, 0);
         self.mem.fill(ATTR_BACK, PLAY_ATTRS, 0);
         self.room.draw(&mut self.mem);
@@ -164,7 +170,15 @@ impl Game {
             self.present();
             return;
         }
-        self.take_exit(outcome);
+        if self.take_exit(outcome) {
+            // The original draws the new room and re-enters the main loop, so
+            // nothing is drawn against the room just left. Without this the
+            // working buffers still hold the old room, and Willy is checked
+            // against its attributes - which killed him on the way into any
+            // room whose neighbour used 255 for a tile he landed on.
+            self.mem.copy(ATTR_BACK, ATTR_BUF, PLAY_ATTRS);
+            self.mem.copy(SCREEN_BACK, SCREEN_BUF, PLAY_PIXELS);
+        }
 
         // Drawing Willy also reports him standing in a nasty, because the
         // original finds that out while colouring the cells he covers.
@@ -209,25 +223,26 @@ impl Game {
             return;
         }
 
-        self.willy = Willy::default();
+        // Back to the doorway he came in by, not to where the game started.
+        self.willy = self.willy_on_entry;
+        self.willy.airborne = 0;
         self.mode = Mode::Playing;
         let room = self.room.number;
         self.enter_room(room);
     }
 
-    /// Follow whichever edge Willy walked off.
-    fn take_exit(&mut self, outcome: Outcome) {
+    /// Follow whichever edge Willy walked off. Reports whether the room changed.
+    fn take_exit(&mut self, outcome: Outcome) -> bool {
         let next = match outcome {
             Outcome::Left => self.room.exits.left,
             Outcome::Right => self.room.exits.right,
             Outcome::Above => self.room.exits.up,
             Outcome::Below => self.room.exits.down,
-            // Dying costs a life, which milestone 2b brings in. Until then he
-            // simply survives it.
-            Outcome::None | Outcome::Died => return,
+            Outcome::None | Outcome::Died => return false,
         };
         self.willy.enter_from(outcome);
         self.enter_room(next as usize);
+        true
     }
 
     fn draw_willy(&mut self) -> bool {
@@ -453,6 +468,66 @@ mod tests {
         };
         game.mem.write(ATTR_BUF + 5 * COLUMNS as u16 + 10, nasty);
         assert!(game.draw_willy(), "a nasty under him went unnoticed");
+    }
+
+    #[test]
+    fn walking_into_the_next_room_does_not_kill_him() {
+        // The frame a room changes on used to leave the previous room's
+        // attributes in the working buffer, and The Bathroom uses 255 for its
+        // nasty, so stepping left into room 34 killed him on arrival.
+        let mut game = Game::new();
+        let go_left = speccy::Input {
+            left: true,
+            ..speccy::Input::default()
+        };
+        for _ in 0..90 {
+            game.update(go_left);
+            game.sounds.clear();
+        }
+        assert_ne!(game.room.number, START_ROOM, "he never left The Bathroom");
+        assert_eq!(game.mode, Mode::Playing, "he died on the way in");
+        assert_eq!(game.lives, STARTING_LIVES);
+    }
+
+    #[test]
+    fn dying_returns_him_to_the_door_he_came_in_by() {
+        let mut game = Game::new();
+        let go_left = speccy::Input {
+            left: true,
+            ..speccy::Input::default()
+        };
+
+        // Walk until the room changes, and note the doorway he arrives at.
+        let mut arrived = game.willy.position();
+        for _ in 0..90 {
+            let before = game.room.number;
+            game.update(go_left);
+            game.sounds.clear();
+            if game.room.number != before {
+                arrived = game.willy.position();
+                break;
+            }
+        }
+        let room = game.room.number;
+        assert_ne!(room, START_ROOM, "he never left The Bathroom");
+
+        // Wander a little, then die.
+        for _ in 0..8 {
+            game.update(go_left);
+            game.sounds.clear();
+        }
+        game.kill();
+        for _ in 0..DEATH_FRAMES + 2 {
+            game.update(speccy::Input::default());
+            game.sounds.clear();
+        }
+
+        assert_eq!(game.room.number, room);
+        assert_eq!(
+            game.willy.position(),
+            arrived,
+            "he should reappear where he entered the room"
+        );
     }
 
     #[test]

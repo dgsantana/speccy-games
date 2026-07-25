@@ -36,10 +36,11 @@ fn main() {
         game.update(input);
         let (row, column) = game.willy.position();
         println!(
-            "{frame:3}  y={:3} row={row:2} col={column:2} airborne={} frame={}",
+            "{frame:3}  room={:2} y={:3} row={row:2} col={column:2} airborne={:3} mode={:?}",
+            game.room.number,
             game.willy.y,
             game.willy.airborne,
-            game.willy.frame
+            game.mode
         );
     }
 }
