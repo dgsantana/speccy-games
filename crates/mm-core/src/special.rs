@@ -9,10 +9,9 @@ use mm_data::TileKind;
 use crate::cavern::Cavern;
 use crate::guardian::{Guardians, attribute_address, set_guardian_attributes, sprite_address};
 use crate::score::Score;
-use crate::sound::SoundQueue;
-use crate::speccy::{
-    ATTR_BUF, DrawMode, Memory, SCREEN_BUF, addr_of, lsb, msb, rot_l, rot_r, screen_row_addr,
-};
+use crate::layout::{ATTR_BUF, SCREEN_BUF, screen_row_addr};
+use speccy::memory::{DrawMode, Memory, addr_of, lsb, msb, rot_l, rot_r};
+use speccy::sound::SoundQueue;
 use crate::willy::{Willy, frame_at};
 
 /// State shared by Eugene and the Kong Beast, which reuse the same two variables.

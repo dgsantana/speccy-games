@@ -1,0 +1,17 @@
+[package]
+name = "speccy"
+description = "The ZX Spectrum's display, sound and controls, shared by every port here"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# Developer switches, off by default. A build without it contains none of the
+# code; see docs/superpowers/specs/2026-07-25-debug-mode-design.md.
+debug = []
+
+[dependencies]
+
+[lints]
+workspace = true

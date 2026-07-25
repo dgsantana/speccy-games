@@ -3,9 +3,10 @@
 use mm_data::TileKind;
 
 use crate::cavern::Cavern;
-use crate::input::Input;
-use crate::sound::SoundQueue;
-use crate::speccy::{DrawMode, Memory, addr_of, lsb, msb, rot_l, rot_r, screen_row_addr};
+use crate::layout::screen_row_addr;
+use speccy::input::Input;
+use speccy::memory::{DrawMode, Memory, addr_of, lsb, msb, rot_l, rot_r};
+use speccy::sound::SoundQueue;
 
 /// Airborne status values with meaning beyond "falling for this many frames".
 const NOT_AIRBORNE: u8 = 0;

@@ -8,7 +8,8 @@
 use mm_data::guardians;
 
 use crate::cavern::Cavern;
-use crate::speccy::{DrawMode, Memory, addr_of, lsb, msb, rot_l, rot_r, screen_row_addr};
+use crate::layout::screen_row_addr;
+use speccy::memory::{DrawMode, Memory, addr_of, lsb, msb, rot_l, rot_r};
 use crate::willy::{Willy, frame_at};
 
 /// A guardian that patrols left and right along one row of cells.

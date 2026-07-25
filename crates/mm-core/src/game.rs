@@ -7,14 +7,14 @@
 
 use crate::cavern::Cavern;
 use crate::guardian::Guardians;
-use crate::input::Input;
-use crate::score::Score;
-use crate::sound::{Sound, SoundQueue};
-use crate::special::{self, Specials};
-use crate::speccy::{
-    ATTR_BACK, ATTR_BUF, ATTR_FILE, DISPLAY, DISPLAY_LEN, DrawMode, Memory, PLAY_ATTRS,
-    PLAY_PIXELS, SCREEN_BACK, SCREEN_BUF, addr_of, rot_l, rot_r, screen_row_addr,
+use crate::layout::{
+    ATTR_BACK, ATTR_BUF, PLAY_ATTRS, PLAY_PIXELS, SCREEN_BACK, SCREEN_BUF, screen_row_addr,
 };
+use crate::score::Score;
+use crate::special::{self, Specials};
+use speccy::input::Input;
+use speccy::memory::{ATTR_FILE, DISPLAY, DISPLAY_LEN, DrawMode, Memory, addr_of, rot_l, rot_r};
+use speccy::sound::{Sound, SoundQueue};
 use crate::willy::{self, Willy};
 
 /// The game runs at the Spectrum's own pace: 17 frames per second.
@@ -77,13 +77,13 @@ pub struct Game {
     pub cheat: bool,
     /// Developer switches. Only exists with the `debug` feature.
     #[cfg(feature = "debug")]
-    pub debug: crate::debug::Debug,
+    pub debug: speccy::Debug,
     /// Cavern to start in, for the original's teleport cheat.
     pub start_cavern: usize,
     /// In-game tune on or off.
     pub music_on: bool,
     pub paused: bool,
-    /// Set when the player asks to quit.
+    /// Set when the player asks to leave, sending the shell back to the picker.
     pub quit: bool,
     /// Counts down an extra-life screen flash.
     flash: u8,
@@ -116,7 +116,7 @@ impl Game {
             mode: Mode::Title { note: 0, scroll: 0 },
             cheat: false,
             #[cfg(feature = "debug")]
-            debug: crate::debug::Debug::default(),
+            debug: speccy::Debug::default(),
             start_cavern: 0,
             music_on: true,
             paused: false,
@@ -220,15 +220,17 @@ impl Game {
         let pressed = Input {
             left: input.left,
             right: input.right,
+            up: input.up,
+            down: input.down,
             jump: input.jump,
             start: input.start && !self.prev_input.start,
             pause: input.pause && !self.prev_input.pause,
             mute: input.mute && !self.prev_input.mute,
-            quit: input.quit,
+            back: input.back,
         };
         self.prev_input = input;
 
-        if pressed.quit {
+        if pressed.back {
             self.quit = true;
             return;
         }
@@ -511,7 +513,7 @@ impl Game {
             self.mem.write(item.attr_addr, attr);
             self.item_attr = attr;
 
-            let screen = addr_of(item.screen_msb, crate::speccy::lsb(item.attr_addr));
+            let screen = addr_of(item.screen_msb, speccy::memory::lsb(item.attr_addr));
             let sprite = mm_data::caverns::ITEM_GRAPHICS[self.cavern.sheet];
             self.mem.draw_sprite(&sprite, screen);
         }
@@ -632,8 +634,8 @@ impl Game {
             let distance = (step * 4) as u8;
             let base = screen_row_addr(distance);
             let addr = addr_of(
-                crate::speccy::msb(base).wrapping_sub(32),
-                crate::speccy::lsb(base) | 15,
+                speccy::memory::msb(base).wrapping_sub(32),
+                speccy::memory::lsb(base) | 15,
             );
             self.mem
                 .draw_16x16(&mm_data::tiles::BOOT, addr, DrawMode::Overwrite);

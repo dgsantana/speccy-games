@@ -6,7 +6,8 @@
 
 use std::io::Write;
 
-use mm_core::{Frame, Game, HEIGHT, Input, WIDTH};
+use mm_core::Game;
+use speccy::{Frame, HEIGHT, Input, WIDTH};
 
 fn main() {
     let dir = std::env::args().nth(1).unwrap_or_else(|| ".".to_owned());

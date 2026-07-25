@@ -8,42 +8,53 @@
 #[cfg(feature = "debug")]
 mod on {
     use macroquad::prelude::*;
-    use mm_core::{CAVERN_COUNT, Game};
+    use speccy::Cartridge;
 
     pub fn enabled() -> bool {
         if !std::env::args().any(|arg| arg == "--debug") {
             return false;
         }
-        println!("Debug mode. F1 next cavern, F2 previous, F3 guardians, F4 lives, F5 air.");
+        println!("Debug mode. F1 next level, F2 previous, F3 guardians, F4 lives, F5 timer.");
         true
     }
 
-    pub fn read_keys(game: &mut Game) {
-        let sheet = game.cavern.sheet;
+    pub fn read_keys(game: &mut dyn Cartridge) {
+        // A game with no switches — and the picker, which is not a game at all —
+        // simply has nothing for these keys to do.
+        let Some(switches) = game.debug() else {
+            return;
+        };
+
+        let count = switches.level_count();
+        let level = switches.level();
         if is_key_pressed(KeyCode::F1) {
-            jump(game, sheet + 1);
+            jump(switches, level + 1, count);
         }
         if is_key_pressed(KeyCode::F2) {
-            jump(game, sheet + CAVERN_COUNT - 1);
+            jump(switches, level + count - 1, count);
         }
         if is_key_pressed(KeyCode::F3) {
-            game.debug.no_guardians = !game.debug.no_guardians;
-            report("guardians", !game.debug.no_guardians);
+            let on = !switches.switches().no_guardians;
+            switches.switches().no_guardians = on;
+            report("guardians", !on);
         }
         if is_key_pressed(KeyCode::F4) {
-            game.debug.invulnerable = !game.debug.invulnerable;
-            report("lives", !game.debug.invulnerable);
+            let on = !switches.switches().invulnerable;
+            switches.switches().invulnerable = on;
+            report("lives", !on);
         }
         if is_key_pressed(KeyCode::F5) {
-            game.debug.frozen_air = !game.debug.frozen_air;
-            report("air", !game.debug.frozen_air);
+            let on = !switches.switches().frozen_air;
+            switches.switches().frozen_air = on;
+            report("timer", !on);
         }
     }
 
-    fn jump(game: &mut Game, sheet: usize) {
-        game.goto_cavern(sheet);
-        if game.cavern.sheet == sheet % CAVERN_COUNT {
-            println!("cavern {}: {}", game.cavern.sheet, game.cavern.name.trim());
+    fn jump(switches: &mut dyn speccy::DebugSwitches, level: usize, count: usize) {
+        let wanted = level % count;
+        switches.goto_level(wanted);
+        if switches.level() == wanted {
+            println!("level {wanted}: {}", switches.level_name());
         }
     }
 
@@ -54,7 +65,7 @@ mod on {
 
 #[cfg(not(feature = "debug"))]
 mod on {
-    use mm_core::Game;
+    use speccy::Cartridge;
 
     pub fn enabled() -> bool {
         if std::env::args().any(|arg| arg == "--debug") {
@@ -63,7 +74,7 @@ mod on {
         false
     }
 
-    pub fn read_keys(_game: &mut Game) {}
+    pub fn read_keys(_game: &mut dyn Cartridge) {}
 }
 
 pub use on::{enabled, read_keys};

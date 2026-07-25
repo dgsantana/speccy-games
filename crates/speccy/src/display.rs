@@ -1,6 +1,6 @@
 //! Turning the display and attribute files into pixels.
 
-use crate::speccy::{ATTR_FILE, DISPLAY, HEIGHT, Memory, WIDTH, display_row_offset};
+use crate::memory::{ATTR_FILE, DISPLAY, HEIGHT, Memory, WIDTH, display_row_offset};
 
 /// The sixteen ZX Spectrum colours: eight normal, then the same eight bright.
 pub const PALETTE: [[u8; 3]; 16] = [

@@ -1,33 +1,20 @@
-//! The slice of ZX Spectrum hardware Manic Miner actually uses.
+//! The Spectrum's address space.
 //!
-//! The game keeps four working buffers alongside the real display and attribute
-//! files, and moves data between them by absolute address. Sprite drawing walks
-//! down a column by incrementing the *high* byte of an address, which is how the
-//! Spectrum display file is laid out. Modelling the address space directly is
-//! what keeps that arithmetic honest, so [`Memory`] is a flat 64K array and the
-//! buffers below are named windows into it.
+//! Games of this era move data around by absolute address, and draw a sprite by
+//! walking down a column incrementing the *high* byte, which is how the display
+//! file is laid out. Modelling the address space directly is what keeps that
+//! arithmetic honest, so [`Memory`] is a flat 64K array and the display and
+//! attribute files are named windows into it. Games put their own working
+//! buffers wherever the original put them.
 
 /// Display file: 6144 bytes of pixels, in Spectrum thirds-and-rows order.
 pub const DISPLAY: u16 = 16384;
 /// Attribute file: one byte per 8x8 cell, 32 columns by 24 rows.
 pub const ATTR_FILE: u16 = 22528;
-/// Working attribute buffer for the playing area, 32 columns by 16 rows.
-pub const ATTR_BUF: u16 = 23552;
-/// Attributes of the empty cavern, copied into [`ATTR_BUF`] at the start of each frame.
-pub const ATTR_BACK: u16 = 24064;
-/// Working pixel buffer for the playing area, the top two thirds of a display file.
-pub const SCREEN_BUF: u16 = 24576;
-/// Pixels of the empty cavern, copied into [`SCREEN_BUF`] at the start of each frame.
-pub const SCREEN_BACK: u16 = 28672;
-
 /// Bytes in the display file.
 pub const DISPLAY_LEN: usize = 6144;
 /// Bytes in the attribute file.
 pub const ATTR_LEN: usize = 768;
-/// Bytes in a playing-area pixel buffer (16 character rows).
-pub const PLAY_PIXELS: usize = 4096;
-/// Bytes in a playing-area attribute buffer (16 character rows).
-pub const PLAY_ATTRS: usize = 512;
 
 /// Screen width in pixels.
 pub const WIDTH: usize = 256;
@@ -147,15 +134,6 @@ pub const fn rot_r(byte: u8, n: u32) -> u8 {
     byte.rotate_right(n)
 }
 
-/// Address in the playing-area pixel buffer of the start of pixel row `row`.
-///
-/// The original kept this as a 128-entry lookup table because working it out on
-/// a Z80 cost more than the table did.
-#[inline]
-pub fn screen_row_addr(row: u8) -> u16 {
-    mm_data::caverns::SCREEN_BUFFER_ADDRS[(row & 127) as usize]
-}
-
 /// Offset into a display file of the leftmost pixel byte of row `y`.
 ///
 /// The display file is ordered by third, then by pixel row within a character,
@@ -177,7 +155,7 @@ impl Memory {
     /// Draw one character of the Spectrum ROM font at `addr`.
     pub fn print_char(&mut self, ch: u8, addr: u16) {
         let index = ch.saturating_sub(32) as usize;
-        let glyph = mm_data::sprites::FONT[index.min(95)];
+        let glyph = crate::font::FONT[index.min(95)];
         self.draw_sprite(&glyph, addr);
     }
 

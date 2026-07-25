@@ -100,7 +100,6 @@ guards = load("data/guardian_sprites.cpp")
 music = load("data/music.cpp")
 title = load("data/title_screen.cpp")
 willy = load("data/willy_sprites.cpp")
-font = load("speccy_font.cpp")
 
 os.makedirs(OUT, exist_ok=True)
 HEAD = """\
@@ -182,8 +181,8 @@ with open(os.path.join(OUT, "sprites.rs"), "w") as f:
     f.write(HEAD)
     emit(f, "WILLY", "u8", [256], parse_nested(find_array(willy, "WILLYDATA")),
          "Eight 16x16 Willy frames: four facing right, then four facing left.")
-    emit(f, "FONT", "u8", [96, 8], parse_nested(find_array(font, "SpeccyDisplay_Font")),
-         "ZX Spectrum ROM font, characters 32 to 127.")
+    # The ROM font is not Manic Miner's: it lives in crates/speccy/src/font.rs,
+    # where every game can print with it, and is not regenerated from here.
 
 # ---- music.rs ---------------------------------------------------------------
 with open(os.path.join(OUT, "music.rs"), "w") as f:

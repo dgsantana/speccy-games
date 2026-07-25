@@ -1,6 +1,6 @@
 [package]
-name = "mm-audio"
-description = "Square-wave beeper synth for the Manic Miner port"
+name = "speccy-audio"
+description = "Square-wave beeper synth for the ZX Spectrum ports here"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 cpal.workspace = true
-mm-core.workspace = true
+speccy.workspace = true
 
 [lints]
 workspace = true

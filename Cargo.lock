@@ -410,8 +410,9 @@ name = "manic-miner-rs"
 version = "0.1.0"
 dependencies = [
  "macroquad",
- "mm-audio",
  "mm-core",
+ "speccy",
+ "speccy-audio",
 ]
 
 [[package]]
@@ -443,18 +444,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "mm-audio"
-version = "0.1.0"
-dependencies = [
- "cpal",
- "mm-core",
-]
-
-[[package]]
 name = "mm-core"
 version = "0.1.0"
 dependencies = [
  "mm-data",
+ "speccy",
 ]
 
 [[package]]
@@ -778,6 +772,18 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "speccy"
+version = "0.1.0"
+
+[[package]]
+name = "speccy-audio"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "speccy",
+]
 
 [[package]]
 name = "syn"

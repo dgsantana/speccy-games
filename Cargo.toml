@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/mm-audio", "crates/mm-core", "crates/mm-data"]
+members = ["crates/mm-core", "crates/mm-data", "crates/speccy", "crates/speccy-audio"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,9 +10,10 @@ license = "MIT"
 repository = "https://github.com/dgsantana/manic-miner-rs"
 
 [workspace.dependencies]
-mm-audio = { path = "crates/mm-audio" }
 mm-core = { path = "crates/mm-core" }
 mm-data = { path = "crates/mm-data" }
+speccy = { path = "crates/speccy" }
+speccy-audio = { path = "crates/speccy-audio" }
 cpal = "0.18"
 macroquad = "0.4"
 
@@ -56,11 +57,12 @@ repository.workspace = true
 [features]
 # Enables the debug switches. They still stay off until the binary is run
 # with --debug.
-debug = ["mm-core/debug"]
+debug = ["mm-core/debug", "speccy/debug"]
 
 [dependencies]
 macroquad.workspace = true
-mm-audio.workspace = true
+speccy.workspace = true
+speccy-audio.workspace = true
 mm-core.workspace = true
 
 [lints]

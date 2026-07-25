@@ -1,18 +1,26 @@
 # manic-miner-rs
 
-Matthew Smith's *Manic Miner* (ZX Spectrum, 1983), ported to Rust 2024 and drawn
-with [macroquad](https://macroquad.rs).
+ZX Spectrum games ported to Rust 2024 and drawn with
+[macroquad](https://macroquad.rs), behind a start screen that picks between
+them.
 
-All twenty caverns, the original tiles and sprites, the real attribute colours,
-and a square-wave beeper playing The Blue Danube on the title screen and In the
-Hall of the Mountain King underground. The engine renders into a virtual
-Spectrum display file, so what you see is what the 1983 machine drew.
+Matthew Smith's *Manic Miner* (1983) is the one that is finished: all twenty
+caverns, the original tiles and sprites, the real attribute colours, and a
+square-wave beeper playing The Blue Danube on the title screen and In the Hall
+of the Mountain King underground. Jet Set Willy I to III and Match Point are
+listed on the picker and are not written yet.
+
+Everything renders into a virtual Spectrum display file, the start screen
+included, so what you see is what the 1983 machine drew.
 
 ## Playing
 
 ```bash
 cargo run --release
 ```
+
+Up and Down move through the list, Enter starts a game, Escape leaves it again.
+Inside a game:
 
 | Key | Action |
 | --- | --- |
@@ -21,7 +29,7 @@ cargo run --release
 | Enter | Start |
 | P | Pause |
 | M | Music on or off |
-| Q or Escape | Quit |
+| Q or Escape | Back to the picker |
 
 ## Debug mode
 
@@ -36,7 +44,7 @@ cargo run --features debug -- --debug
 
 | Key | Action |
 | --- | --- |
-| F1 / F2 | Next / previous cavern |
+| F1 / F2 | Next / previous level |
 | F3 | Guardians on or off |
 | F4 | Lives on or off |
 | F5 | Air drain on or off |
@@ -49,19 +57,24 @@ their caverns cannot be finished otherwise; they just cannot kill you.
 
 ## How it is put together
 
-Four crates. The engine knows nothing about windows, so it can be tested without
-one.
+The machine is one crate and each game is another. Nothing below the front end
+knows about windows, so all of it can be tested without one.
 
 | Crate | What it does |
 | --- | --- |
-| `manic-miner-rs` | macroquad front end: window, input, texture upload |
-| `mm-core` | The game: display model, caverns, Willy, guardians, game loop |
-| `mm-data` | Byte tables from the original, generated and committed |
-| `mm-audio` | cpal square-wave beeper |
+| `manic-miner-rs` | macroquad front end: window, input, the picker |
+| `speccy` | The machine: memory map, display, palette, sound, ROM font |
+| `speccy-audio` | cpal square-wave beeper |
+| `mm-core` | Manic Miner: caverns, Willy, guardians, game loop |
+| `mm-data` | Manic Miner byte tables, generated and committed |
 
-`mm-core` keeps the Spectrum's memory map because the game's own logic depends
-on it — sprites move down the screen by incrementing the high byte of an
-address. `AGENT.md` explains that in more detail.
+A game is a `speccy::Cartridge` — five methods the front end calls each frame —
+so adding one means writing its crate and adding a row to the picker's
+catalogue.
+
+`speccy` keeps the Spectrum's memory map because the games' own logic depends on
+it: sprites move down the screen by incrementing the high byte of an address.
+[CLAUDE.md](CLAUDE.md) explains that in more detail.
 
 To see the engine's output without a window:
 
@@ -71,8 +84,8 @@ cargo run -p mm-core --example dump_frames -- /tmp/frames
 
 ## Provenance and licence
 
-The Rust code is original and MIT licensed. The game data — cavern layouts, tile
-and sprite bitmaps, guardian definitions and the tunes — is derived from the
+The Rust code is original and MIT licensed. Manic Miner's data — cavern layouts,
+tile and sprite bitmaps, guardian definitions and the tunes — is derived from the
 published [Manic Miner disassembly](https://skoolkid.github.io/manicminer/) by
 way of [Michael R. Cook's C++ port](https://github.com/mrcook/manic-miner), and
 remains Copyright © 1983 Matthew Smith. This is a hobby preservation project,

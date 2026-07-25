@@ -35,7 +35,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use mm_core::Sound;
+use speccy::Sound;
 
 /// Iterations of the sound loop per second: 3.5 MHz divided by 56 T-states.
 pub const ITERATIONS_PER_SECOND: f32 = 62_500.0;

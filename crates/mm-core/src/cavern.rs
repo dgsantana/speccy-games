@@ -2,9 +2,9 @@
 
 use mm_data::{TileKind, caverns};
 
-use crate::speccy::{
-    ATTR_BACK, DISPLAY, Memory, PLAY_ATTRS, SCREEN_BACK, addr_of, lsb, msb, next_cell,
-    next_pixel_row, rot_l, rot_r,
+use crate::layout::{ATTR_BACK, PLAY_ATTRS, SCREEN_BACK};
+use speccy::memory::{
+    DISPLAY, Memory, addr_of, lsb, msb, next_cell, next_pixel_row, rot_l, rot_r,
 };
 
 /// An 8x8 tile: the attribute byte that identifies it in the layout, and its bitmap.
