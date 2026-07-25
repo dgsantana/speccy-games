@@ -70,6 +70,20 @@ python3 tools/gen_data.py crates/mm-data/src   # expects /tmp/ref/src alongside
 The generated files carry a "do not edit by hand" header. `INTRO_MESSAGE` is
 written by the generator too, so change it there rather than in `title.rs`.
 
+Jet Set Willy's tables come from SkoolKit's disassembly instead, which SkoolKit
+itself assembles back into the game's 64K image:
+
+```bash
+uv tool install skoolkit          # provides skool2bin.py
+git clone --depth 1 https://gitlab.com/z80-source-code-software/other-systems/jet-set-willy-disassembly---zx-spectrum /tmp/jsw
+python3 tools/gen_jsw_data.py crates/jsw-data/src
+```
+
+Point `JSW_SNAPSHOT` at a `.z80` of the game to check the result against a real
+dump as well. Everything matches byte for byte except the item table's
+collection flag, which is live state rather than data. Snapshots stay out of the
+repository; `z80/` is ignored.
+
 ## Checking your work
 
 ```bash

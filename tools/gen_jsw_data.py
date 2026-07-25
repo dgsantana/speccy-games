@@ -9,6 +9,9 @@ Not part of the build. Run it only when the tables need to change:
       /tmp/jsw
     python3 tools/gen_jsw_data.py crates/jsw-data/src
 
+Setting JSW_SNAPSHOT to a .z80 of the game additionally checks the bytes against
+a real dump. The snapshot is a check rather than a source, and is not committed.
+
 SkoolKit assembles the .skool file back into the 64K image the game ran in, and
 everything below is read out of that by absolute address. So what lands in
 jsw-data is the game's own bytes rather than anyone's transcription of them, and
@@ -17,6 +20,7 @@ it can be checked against the disassembly line by line.
 
 import os
 import re
+import struct
 import subprocess
 import sys
 import tempfile
@@ -83,6 +87,67 @@ def load_image(path):
     return memory
 
 
+def load_snapshot(path):
+    """Decode a .z80 snapshot into a 64K image, for checking the generator.
+
+    Only version 1 is handled, which is what the common dumps of this game are:
+    a 30-byte header then the 48K of RAM, optionally run-length compressed.
+    """
+    data = open(path, "rb").read()
+    if struct.unpack("<H", data[6:8])[0] == 0:
+        sys.exit(f"{path} is a version 2 or 3 snapshot, which this does not read")
+
+    body = data[30:]
+    compressed = (data[12] >> 5) & 1
+    if compressed:
+        if body[-4:] == b"\x00\xed\xed\x00":
+            body = body[:-4]
+        ram = bytearray()
+        index = 0
+        while index < len(body):
+            if body[index] == 0xED and index + 1 < len(body) and body[index + 1] == 0xED:
+                ram += bytes([body[index + 3]]) * body[index + 2]
+                index += 4
+            else:
+                ram.append(body[index])
+                index += 1
+    else:
+        ram = bytearray(body)
+
+    memory = bytearray(65536)
+    memory[16384:16384 + len(ram)] = ram[:49152]
+    return memory
+
+
+def verify(memory, snapshot_path):
+    """Check the disassembly's image against a real snapshot of the game."""
+    snapshot = load_snapshot(snapshot_path)
+    # The item table's collection flag is live state: a snapshot taken after the
+    # game has started has it set the other way for each of the 83 items. Only
+    # that bit may differ, so it is masked out rather than ignored.
+    collected = 64
+    regions = [
+        ("rooms", ROOMS, ROOM_COUNT * ROOM_SIZE, 255),
+        ("entity definitions", ENTITY_DEFS, ENTITY_DEF_COUNT * ENTITY_DEF_SIZE, 255),
+        ("item table", ITEM_TABLE, 512, 255 - collected),
+        ("Willy's sprites", WILLY_SPRITES, 256, 255),
+        ("guardian graphics", GUARDIAN_GRAPHICS, 2048, 255),
+    ]
+    bad = 0
+    for name, start, length, mask in regions:
+        differing = sum(
+            1
+            for i in range(length)
+            if memory[start + i] & mask != snapshot[start + i] & mask
+        )
+        status = "matches" if differing == 0 else f"DIFFERS in {differing} bytes"
+        print(f"  {name:20} {status}")
+        bad += differing
+    if bad:
+        sys.exit(f"{bad} bytes differ from {snapshot_path}")
+    print("the disassembly and the snapshot agree")
+
+
 # ---- writing Rust -----------------------------------------------------------
 
 def fmt(data):
@@ -127,6 +192,13 @@ def main():
 
     memory = load_image(SKOOL)
     check(memory)
+
+    # Optional: prove the disassembly assembles to the same bytes a real
+    # snapshot holds. The snapshot is never committed and is not needed to
+    # generate; this is a check, not a source.
+    snapshot = os.environ.get("JSW_SNAPSHOT")
+    if snapshot:
+        verify(memory, snapshot)
 
     os.makedirs(OUT, exist_ok=True)
     rooms = [

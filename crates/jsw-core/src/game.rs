@@ -152,8 +152,14 @@ impl Game {
             .expect("a Willy frame is 32 bytes");
 
         // His sprite hangs from a pixel offset inside the cell, so it is drawn
-        // one pixel row at a time rather than as a tidy 16x16 block.
-        let pixel_offset = (self.willy.y % willy::ROW_UNITS) as usize / 2;
+        // one pixel row at a time rather than as a tidy 16x16 block. On a ramp
+        // the offset also carries the sub-cell height the drawing routine adds,
+        // which is what makes a climb look smooth.
+        let drawn_y = self
+            .willy
+            .y
+            .wrapping_add(self.willy.draw_offset(&self.room, &self.mem));
+        let pixel_offset = (drawn_y % willy::ROW_UNITS) as usize / 2;
         for (line, pair) in sprite.chunks_exact(2).enumerate() {
             let y = row * 8 + pixel_offset + line;
             if y >= ROWS * 8 {
@@ -164,12 +170,11 @@ impl Game {
             self.mem.write(at + 1, self.mem.read(at + 1) | pair[1]);
         }
 
-        // Sixteen pixels starting part way down a cell cover three rows of
-        // cells, not two. Colouring only two leaves his legs drawn in the
-        // background's ink, which is usually black on black: he appears to be
-        // cut in half every time he steps off a cell boundary.
-        let rows_covered = if pixel_offset > 0 { 3 } else { 2 };
-        for cell_row in row..(row + rows_covered).min(ROWS) {
+        // The original colours six cells, three rows of two, whether or not his
+        // sprite reaches the third row: sixteen pixels starting part way down a
+        // cell cover three rows, and colouring only two leaves his legs drawn
+        // in the background's ink, which is usually black on black.
+        for cell_row in row..(row + 3).min(ROWS) {
             for cell_column in column..(column + 2).min(COLUMNS) {
                 self.mem
                     .write(ATTR_BUF + (cell_row * COLUMNS + cell_column) as u16, 71);

@@ -98,6 +98,32 @@ impl Willy {
         self.flags & facing::LEFT != 0
     }
 
+    /// How far below his y-coordinate he is actually drawn, in the same half
+    /// pixel units, from the routine at 38344.
+    ///
+    /// Standing on a ramp, Willy is drawn 0, 2, 4 or 6 pixels lower than his
+    /// y-coordinate says, chosen by his animation frame and reversed for a ramp
+    /// that climbs to the right. His position still steps a whole cell at a
+    /// time; this is what makes the climb look smooth rather than blocky, and
+    /// it is why the disassembly notes he can be up to 6 pixels above the ramp
+    /// he is standing on.
+    pub fn draw_offset(&self, room: &Room, mem: &speccy::Memory) -> u8 {
+        if self.airborne != 0 {
+            return 0;
+        }
+        let (row, column) = self.position();
+        let climbs_right = room.ramp.direction != 0;
+
+        // The cell under the foot on the side the ramp climbs from.
+        let under = if climbs_right { column + 1 } else { column };
+        if row + 2 >= ROWS || cell_attr(mem, row + 2, under) != room.tile(Kind::Ramp).attr {
+            return 0;
+        }
+
+        let step = (self.frame & 3) * 4;
+        if climbs_right { 12 - step } else { step }
+    }
+
     /// Which of the eight sprite frames to draw.
     pub fn sprite_frame(&self) -> usize {
         if self.facing_left() {
@@ -471,6 +497,45 @@ mod tests {
             );
         }
         assert!(heights.len() > 2, "he never climbed: {heights:?}");
+    }
+
+    #[test]
+    fn standing_on_a_ramp_draws_him_between_cells() {
+        // The Bathroom's ramp climbs right, so the offset counts down from 12
+        // as the animation frame counts up: he creeps up a pixel at a time
+        // between the whole-cell steps.
+        let (room, mut mem) = staged(33);
+        assert_eq!(room.ramp.direction, 1);
+
+        let mut willy = Willy {
+            y: 10 * ROW_UNITS,
+            cell: ATTR_BUF + 10 * COLUMNS as u16 + 8,
+            ..Willy::default()
+        };
+        // The original probes the cell at (row+2, column+1) for a ramp that
+        // climbs right. The ramp runs (12,9), (11,10), (10,11) and up, so
+        // standing at (9,9) puts (11,10) under his right foot.
+        willy.y = 9 * ROW_UNITS;
+        willy.cell = ATTR_BUF + 9 * COLUMNS as u16 + 9;
+
+        let offsets: Vec<u8> = (0..4)
+            .map(|frame| {
+                willy.frame = frame;
+                willy.draw_offset(&room, &mem)
+            })
+            .collect();
+        assert_eq!(offsets, vec![12, 8, 4, 0], "ramp offsets for a right climb");
+
+        // Airborne, the ramp is ignored entirely.
+        willy.airborne = 1;
+        assert_eq!(willy.draw_offset(&room, &mem), 0);
+
+        // Off the ramp there is no offset either.
+        willy.airborne = 0;
+        willy.cell = ATTR_BUF + 13 * COLUMNS as u16 + 20;
+        willy.sync_cell();
+        let _ = &mut mem;
+        assert_eq!(willy.draw_offset(&room, &mem), 0);
     }
 
     #[test]
