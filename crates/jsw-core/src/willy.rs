@@ -539,6 +539,36 @@ mod tests {
     }
 
     #[test]
+    fn the_chapel_ramp_shoves_him_along_because_it_looks_like_a_conveyor() {
+        // The Chapel gives its ramp and its conveyor the same attribute byte,
+        // 7. The conveyor test compares attributes, so every ramp cell reads as
+        // conveyor and Willy cannot stand still on it: he is pushed the way the
+        // room's conveyor direction says, which walks him back down the ramp.
+        // This is the original's behaviour, not a fault in the port.
+        let (room, mut mem) = staged(27);
+        assert_eq!(
+            room.tile(Kind::Ramp).attr,
+            room.tile(Kind::Conveyor).attr,
+            "the Chapel's clash is the whole point of this test"
+        );
+
+        let mut willy = Willy {
+            y: 11 * ROW_UNITS,
+            cell: ATTR_BUF + 11 * COLUMNS as u16 + 17,
+            ..Willy::default()
+        };
+        let start = willy.position();
+        for _ in 0..6 {
+            willy.update(&room, &mut mem, Input::default());
+        }
+        assert_ne!(
+            willy.position(),
+            start,
+            "he stood still on the Chapel ramp; the original will not let him"
+        );
+    }
+
+    #[test]
     fn the_movement_table_turns_him_around_before_moving_him() {
         // Facing right and standing, asked to go left: he turns, does not move.
         assert_eq!(MOVEMENT[4], facing::LEFT);

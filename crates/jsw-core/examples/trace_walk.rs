@@ -21,11 +21,16 @@ fn main() {
         game.willy.y = (row * 16) as u8;
     }
     let leftwards = std::env::args().any(|a| a == "--left");
+    let idle = std::env::args().any(|a| a == "--idle");
 
-    let input = Input {
-        left: leftwards,
-        right: !leftwards,
-        ..Input::default()
+    let input = if idle {
+        Input::default()
+    } else {
+        Input {
+            left: leftwards,
+            right: !leftwards,
+            ..Input::default()
+        }
     };
     for frame in 0..frames {
         game.update(input);
