@@ -12,6 +12,7 @@ pub mod entity;
 pub mod game;
 pub mod hud;
 pub mod item;
+pub mod map;
 pub mod room;
 pub mod willy;
 

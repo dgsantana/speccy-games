@@ -9,109 +9,45 @@
 //! the game's rather than anything guessed: a left exit puts a room one column
 //! west, an up exit one row north, and so on.
 //!
-//! Most of the mansion is a tidy grid - room numbers rise westward and northward
-//! - but not all of it, and the exits are not always mutual. Anything that does
-//! not fit is listed rather than hidden.
+//! Most of the mansion is a tidy grid, room numbers rising westward and
+//! northward, but not all of it: the exits are not always mutual. Anything that
+//! does not fit is listed rather than hidden.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 
 use jsw_core::Room;
-
-/// A room's place in the house.
-type Place = (i32, i32);
-
-/// Whether an exit goes anywhere.
-///
-/// A room names itself when there is no way out that side, and most of the
-/// mansion names room 0 for the same purpose - so many rooms claim to lead to
-/// The Off Licence when what they mean is "nowhere". Only its real neighbour,
-/// The Bridge, is taken at its word.
-fn leads_somewhere(from: usize, dest: usize) -> bool {
-    dest != from && (dest != 0 || from == 1)
-}
+use jsw_core::map::Place;
 
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| "mansion.svg".into());
 
     let rooms: Vec<Room> = (0..jsw_core::ROOM_COUNT)
         .map(Room::load)
-        .filter(|room| room.is_real())
+        .filter(Room::is_real)
         .collect();
 
-    let (places, oddities) = place_rooms(&rooms);
-    print_grid(&rooms, &places);
+    let layout = jsw_core::map::layout();
+    print_grid(&rooms, &layout.places);
 
-    if oddities.is_empty() {
+    let named = |n: usize| {
+        rooms
+            .iter()
+            .find(|r| r.number == n)
+            .map_or_else(|| n.to_string(), |r| r.title.clone())
+    };
+    if layout.oddities.is_empty() {
         println!("\nevery exit fits the grid");
     } else {
-        println!("\n{} exits that do not fit the grid:", oddities.len());
-        for line in &oddities {
-            println!("  {line}");
+        println!("\n{} exits that do not fit the grid:", layout.oddities.len());
+        for &(from, to) in &layout.oddities {
+            println!("  {from} ({}) leads to {to} ({})", named(from), named(to));
         }
     }
 
-    let svg = draw_svg(&rooms, &places);
+    let svg = draw_svg(&rooms, &layout.places);
     std::fs::write(&path, svg).expect("could not write the map");
     println!("\nwrote {path}");
-}
-
-/// Walk the exits outward from Willy's starting room, giving each room a place.
-fn place_rooms(rooms: &[Room]) -> (HashMap<usize, Place>, Vec<String>) {
-    let by_number: HashMap<usize, &Room> = rooms.iter().map(|r| (r.number, r)).collect();
-    let start = jsw_core::game::START_ROOM;
-
-    let mut places: HashMap<usize, Place> = HashMap::new();
-    let mut oddities = Vec::new();
-    let mut queue = VecDeque::new();
-
-    places.insert(start, (0, 0));
-    queue.push_back(start);
-
-    while let Some(number) = queue.pop_front() {
-        let here = places[&number];
-        let Some(room) = by_number.get(&number) else {
-            continue;
-        };
-
-        for (name, dest, step) in [
-            ("left", room.exits.left, (-1, 0)),
-            ("right", room.exits.right, (1, 0)),
-            ("up", room.exits.up, (0, -1)),
-            ("down", room.exits.down, (0, 1)),
-        ] {
-            let dest = usize::from(dest);
-            if !leads_somewhere(number, dest) || !by_number.contains_key(&dest) {
-                continue;
-            }
-            let want = (here.0 + step.0, here.1 + step.1);
-            match places.get(&dest) {
-                None => {
-                    places.insert(dest, want);
-                    queue.push_back(dest);
-                }
-                Some(&had) if had != want => {
-                    let name_of = |n: usize| {
-                        by_number
-                            .get(&n)
-                            .map_or_else(|| n.to_string(), |r| r.title.clone())
-                    };
-                    oddities.push(format!(
-                        "{} ({}) {name} to {} ({}), which sits at {:?} not {:?}",
-                        number,
-                        name_of(number),
-                        dest,
-                        name_of(dest),
-                        had,
-                        want
-                    ));
-                }
-                Some(_) => {}
-            }
-        }
-    }
-
-    (places, oddities)
 }
 
 /// Print the house as a grid of room numbers.
@@ -210,7 +146,9 @@ laid out by the rooms' own exits</text>
             (room.exits.down, (0, 1)),
         ] {
             let dest = usize::from(dest);
-            if !leads_somewhere(room.number, dest) || !by_number.contains_key(&dest) {
+            if !jsw_core::map::leads_somewhere(room.number, dest)
+                || !by_number.contains_key(&dest)
+            {
                 continue;
             }
             let Some(&to) = places.get(&dest) else {
@@ -221,20 +159,32 @@ laid out by the rooms' own exits</text>
             }
             let (fx, fy) = corner(from);
             let (tx, ty) = corner(to);
-            let _ = write!(
+            let _ = writeln!(
                 svg,
-                r##"<path class="odd" d="M {} {} Q {} {} {} {}"/>
-"##,
+                r#"<path class="odd" d="M {} {} Q {} {} {} {}"/>"#,
                 fx + CELL_W / 2,
                 fy + CELL_H / 2,
-                (fx + tx) / 2 + CELL_W / 2,
-                (fy + ty) / 2 + CELL_H / 2 - 40,
+                i32::midpoint(fx, tx) + CELL_W / 2,
+                i32::midpoint(fy, ty) + CELL_H / 2 - 40,
                 tx + CELL_W / 2,
                 ty + CELL_H / 2
             );
         }
     }
 
+    draw_boxes(&mut svg, rooms, places, &corner);
+
+    svg.push_str("</svg>\n");
+    svg
+}
+
+/// A labelled box per room.
+fn draw_boxes(
+    svg: &mut String,
+    rooms: &[Room],
+    places: &HashMap<usize, Place>,
+    corner: &impl Fn(Place) -> (i32, i32),
+) {
     for room in rooms {
         let Some(&place) = places.get(&room.number) else {
             continue;
@@ -247,9 +197,9 @@ laid out by the rooms' own exits</text>
         };
         let _ = write!(
             svg,
-            r##"<rect class="{class}" x="{}" y="{}" width="{}" height="{}" rx="4"/>
+            r#"<rect class="{class}" x="{}" y="{}" width="{}" height="{}" rx="4"/>
 <text class="num" x="{}" y="{}">{}</text>
-"##,
+"#,
             x + 3,
             y + 3,
             CELL_W - 6,
@@ -260,19 +210,15 @@ laid out by the rooms' own exits</text>
         );
 
         for (line, part) in wrap(&room.title, 17).into_iter().enumerate() {
-            let _ = write!(
+            let _ = writeln!(
                 svg,
-                r##"<text class="name" x="{}" y="{}">{}</text>
-"##,
+                r#"<text class="name" x="{}" y="{}">{}</text>"#,
                 x + 9,
                 y + 25 + line as i32 * 13,
                 escape(&part)
             );
         }
     }
-
-    svg.push_str("</svg>\n");
-    svg
 }
 
 /// Break a room name into lines short enough for its box.

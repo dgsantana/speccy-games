@@ -23,12 +23,16 @@ fn main() {
         rooms
     };
 
+    let map = std::env::args().any(|a| a == "--map");
+
     let mut frame = Frame::new();
     for number in rooms {
         let mut game = Game::new();
         game.goto_room(number);
+        game.debug.map = map;
         game.update(Input::default());
-        write_ppm(&dir, &format!("room-{number:02}"), &mut frame, &game);
+        let name = if map { "map" } else { "room" };
+        write_ppm(&dir, &format!("{name}-{number:02}"), &mut frame, &game);
     }
 }
 

@@ -48,6 +48,7 @@ cargo run --features debug -- --debug
 | F3 | Guardians on or off |
 | F4 | Lives on or off |
 | F5 | Air drain on or off |
+| F6 | Map of the house, in Jet Set Willy |
 
 The keys act during play only, and nothing is drawn on the Spectrum screen —
 each toggle prints a line to the terminal instead. Jumping to a cavern leaves

@@ -14,6 +14,8 @@ pub struct Debug {
     pub no_guardians: bool,
     /// Whatever is counting the level down stops. In Manic Miner that is the air.
     pub frozen_air: bool,
+    /// Show a map of the levels instead of the game, for a game that has one.
+    pub map: bool,
 }
 
 /// A game that can be poked at while it runs.

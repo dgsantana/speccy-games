@@ -56,6 +56,9 @@ pub struct Game {
     pub minute: u8,
     /// The time of day, from seven in the morning.
     pub clock: crate::hud::Clock,
+    /// Rooms Willy has been in, for the debug map. Cheap enough to keep whether
+    /// or not anything looks at it.
+    visited: Vec<bool>,
     pub lives: u8,
     pub mode: Mode,
     pub sounds: SoundQueue,
@@ -86,6 +89,7 @@ impl Game {
             items: Items::new(),
             minute: 0,
             clock: crate::hud::Clock::default(),
+            visited: vec![false; jsw_data::ROOM_COUNT],
             lives: STARTING_LIVES,
             mode: Mode::Playing,
             sounds: SoundQueue::default(),
@@ -107,6 +111,9 @@ impl Game {
     /// Load a room, draw it into the empty-room buffers, and put its name up.
     fn enter_room(&mut self, number: usize) {
         self.room = Room::load(number % jsw_data::ROOM_COUNT);
+        if let Some(seen) = self.visited.get_mut(self.room.number) {
+            *seen = true;
+        }
         self.entities = Entities::load(&self.room);
         self.willy_on_entry = self.willy;
         self.mem.fill(SCREEN_BACK, PLAY_PIXELS, 0);
@@ -332,6 +339,21 @@ impl Game {
 
         here == self.room.tile(crate::room::Kind::Nasty).attr
     }
+    /// Replace the screen with a map of the mansion, if that switch is on.
+    #[inline]
+    #[allow(clippy::unused_self)]
+    fn draw_map(&mut self) {
+        #[cfg(feature = "debug")]
+        if self.debug.map {
+            let name = self.room.name;
+            let number = self.room.number;
+            // Lent out and given back, rather than copied every frame.
+            let visited = std::mem::take(&mut self.visited);
+            crate::map::draw(&mut self.mem, number, &visited, &name);
+            self.visited = visited;
+        }
+    }
+
     /// The bottom third of the screen: room name, items, clock and lives.
     fn draw_hud(&mut self) {
         let name = self.room.name;
@@ -347,7 +369,16 @@ impl Game {
     }
 
     /// Copy the working buffers to the screen the front end reads.
+    ///
+    /// The map, if it is up, goes on last: it replaces the whole screen, so
+    /// anything drawn after it would show through.
     fn present(&mut self) {
+        self.blit();
+        self.draw_map();
+    }
+
+    /// The playing area, from the working buffers to the display file.
+    fn blit(&mut self) {
         self.mem.copy(ATTR_BUF, ATTR_FILE, PLAY_ATTRS);
         for row in 0..ROWS {
             for pixel_row in 0..8 {

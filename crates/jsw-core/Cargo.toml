@@ -25,6 +25,7 @@ required-features = ["debug"]
 
 [[example]]
 name = "dump_rooms"
+required-features = ["debug"]
 
 [[example]]
 name = "map"

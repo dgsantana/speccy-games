@@ -14,7 +14,10 @@ mod on {
         if !std::env::args().any(|arg| arg == "--debug") {
             return false;
         }
-        println!("Debug mode. F1 next level, F2 previous, F3 guardians, F4 lives, F5 timer.");
+        println!(
+            "Debug mode. F1 next level, F2 previous, F3 guardians, F4 lives, \
+F5 timer, F6 map."
+        );
         true
     }
 
@@ -47,6 +50,11 @@ mod on {
             let on = !switches.switches().frozen_air;
             switches.switches().frozen_air = on;
             report("timer", !on);
+        }
+        if is_key_pressed(KeyCode::F6) {
+            let on = !switches.switches().map;
+            switches.switches().map = on;
+            report("map", on);
         }
     }
 

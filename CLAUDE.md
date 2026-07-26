@@ -125,6 +125,10 @@ cargo run -p jsw-core --features debug --example trace_walk -- 33 40  # Willy pe
 cargo run -p jsw-core --example map -- docs/jsw-mansion.svg   # the whole house
 ```
 
+F6 shows the same map in the game, drawn on the Spectrum screen with the room
+you are in flashing and the ones you have been in picked out. Both come from
+`jsw_core::map`, so there is one idea of where the rooms are.
+
 `map` lays the mansion out by walking the rooms' own exits from the one Willy
 starts in, so it shows the game's geography rather than a guess at it. The
 committed copy is [docs/jsw-mansion.svg](docs/jsw-mansion.svg). It also lists
