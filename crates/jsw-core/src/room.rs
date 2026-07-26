@@ -164,6 +164,17 @@ impl Room {
         }
     }
 
+    /// Whether this is a room at all.
+    ///
+    /// Three of the sixty-four 256-byte blocks hold code and leftovers rather
+    /// than rooms, so their "names" are not text. The game never takes Willy
+    /// there; only a debug jump can reach them.
+    pub fn is_real(&self) -> bool {
+        self.name
+            .iter()
+            .all(|&b| b == 32 || (33..127).contains(&b))
+    }
+
     /// What is at a cell, taking the ramp and conveyor into account.
     pub fn kind_at(&self, row: usize, column: usize) -> Kind {
         if self.ramp_cells().any(|cell| cell == (row, column)) {
@@ -274,6 +285,20 @@ mod tests {
     fn the_first_room_is_the_off_licence() {
         let room = Room::load(0);
         assert_eq!(room.title, "The Off Licence");
+    }
+
+    #[test]
+    fn the_last_three_blocks_are_not_rooms() {
+        // 61 to 63 hold code, which is why their names read as rubbish.
+        for number in 0..jsw_data::ROOM_COUNT {
+            let room = Room::load(number);
+            assert_eq!(
+                room.is_real(),
+                number < 61,
+                "room {number} named {:?}",
+                room.title
+            );
+        }
     }
 
     #[test]

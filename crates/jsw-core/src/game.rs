@@ -235,7 +235,9 @@ impl Game {
             return;
         }
 
-        self.lives = self.lives.saturating_sub(1);
+        if !self.invulnerable() {
+            self.lives = self.lives.saturating_sub(1);
+        }
         if self.lives == 0 {
             self.mode = Mode::GameOver;
             return;
@@ -358,6 +360,21 @@ impl Game {
         }
     }
 
+    /// Whether losing a life costs one. Folds to false without the `debug`
+    /// feature, so the engine is unchanged.
+    #[inline]
+    #[allow(clippy::unused_self)]
+    fn invulnerable(&self) -> bool {
+        #[cfg(feature = "debug")]
+        {
+            self.debug.invulnerable
+        }
+        #[cfg(not(feature = "debug"))]
+        {
+            false
+        }
+    }
+
     /// Push the debug switches into the parts that read them.
     #[inline]
     #[allow(clippy::unused_self)]
@@ -375,6 +392,17 @@ impl Game {
     pub fn goto_room(&mut self, number: usize) {
         self.enter_room(number % jsw_data::ROOM_COUNT);
         self.willy = Willy::default();
+    }
+
+    /// Rooms a debug jump will visit: the ones that are rooms.
+    ///
+    /// The last three of the sixty-four blocks hold code, and jumping into one
+    /// shows a screen of rubbish with a rubbish name.
+    #[cfg(feature = "debug")]
+    pub fn real_room_count() -> usize {
+        (0..jsw_data::ROOM_COUNT)
+            .find(|&n| !Room::load(n).is_real())
+            .unwrap_or(jsw_data::ROOM_COUNT)
     }
 }
 
@@ -593,6 +621,27 @@ mod tests {
         let game = Game::new();
         assert_eq!(game.items.remaining(), 83);
         assert_eq!(game.items.collected, 0);
+    }
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn invulnerability_costs_no_lives_and_never_ends_the_game() {
+        let mut game = Game::new();
+        game.debug.invulnerable = true;
+        game.lives = 1;
+
+        // Die repeatedly. The death sequence still runs - the original's cheat
+        // does not stop that either - but the count must not move, and the game
+        // must never reach its end.
+        for _ in 0..4 {
+            game.kill();
+            for _ in 0..DEATH_FRAMES + 2 {
+                game.update(speccy::Input::default());
+                game.sounds.clear();
+            }
+            assert_eq!(game.mode, Mode::Playing, "the game ended anyway");
+            assert_eq!(game.lives, 1);
+        }
     }
 
     #[test]

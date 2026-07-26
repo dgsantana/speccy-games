@@ -226,8 +226,14 @@ fn draw_guardian(buffer: &[u8; BUFFER], mem: &mut Memory) -> bool {
     let high = 92 | (y >> 7);
     let attr = addr_of(high, low);
 
-    // Ink and bright from the buffer's colour nibble; paper is left alone.
-    let colour = ((buffer[1] & 15).wrapping_add(56)) & 71;
+    // Ink and bright come from the buffer's colour nibble, the paper from the
+    // room. The original reads the paper out of the guardian's first cell only,
+    // merges it by exclusive-or, and writes that one value into every cell the
+    // sprite covers - so a guardian crossing a change of background carries the
+    // first cell's paper with it.
+    let ink = ((buffer[1] & 15).wrapping_add(56)) & 71;
+    let paper = mem.read(attr) & 56;
+    let colour = paper ^ ink;
     let rows = if y & 14 == 0 { 2 } else { 3 };
     for row in 0..rows {
         let at = attr.wrapping_add(row * 32);
@@ -359,6 +365,32 @@ mod tests {
             after > before,
             "the guardian coloured its cells but drew no pixels"
         );
+    }
+
+    #[test]
+    fn a_guardian_keeps_the_rooms_paper_colour() {
+        // Its cells must not turn black in a room whose background is not.
+        let room = Room::load(28);
+        let entities = Entities::load(&room);
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+        mem.copy(
+            speccy::layout::ATTR_BACK,
+            ATTR_BUF,
+            speccy::layout::PLAY_ATTRS,
+        );
+
+        // Give the guardian's first cell a paper colour to carry.
+        let buffer = entities.buffers[0];
+        let low = jsw_data::entities::SCREEN_TABLE[buffer[3] as usize]
+            .wrapping_add(buffer[2] & 31);
+        let attr = speccy::memory::addr_of(92 | (buffer[3] >> 7), low);
+        mem.write(attr, 8 * 2); // paper 2, ink 0
+
+        entities.draw(&mut mem);
+        let after = mem.read(attr);
+        assert_eq!(after & 56, 8 * 2, "the guardian blacked out the background");
+        assert_ne!(after & 7, 0, "the guardian has no ink of its own");
     }
 
     #[test]
