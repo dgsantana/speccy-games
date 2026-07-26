@@ -51,9 +51,11 @@ pub struct Game {
     willy_on_entry: Willy,
     pub entities: Entities,
     pub items: Items,
-    /// The clock, which the original counts in minutes from seven in the
-    /// morning. It paces the item colours; the display of it is milestone 2c.
+    /// Frames since the clock last moved. The original keeps this as a byte and
+    /// advances the clock when it wraps, which also paces the item colours.
     pub minute: u8,
+    /// The time of day, from seven in the morning.
+    pub clock: crate::hud::Clock,
     pub lives: u8,
     pub mode: Mode,
     pub sounds: SoundQueue,
@@ -83,6 +85,7 @@ impl Game {
             entities: Entities::default(),
             items: Items::new(),
             minute: 0,
+            clock: crate::hud::Clock::default(),
             lives: STARTING_LIVES,
             mode: Mode::Playing,
             sounds: SoundQueue::default(),
@@ -109,18 +112,6 @@ impl Game {
         self.mem.fill(SCREEN_BACK, PLAY_PIXELS, 0);
         self.mem.fill(ATTR_BACK, PLAY_ATTRS, 0);
         self.room.draw(&mut self.mem);
-        self.draw_room_name();
-    }
-
-    /// The room name sits on the bottom two rows, where the original puts it.
-    fn draw_room_name(&mut self) {
-        let addr = DISPLAY + 4096 + 32 * 4;
-        for (index, &byte) in self.room.name.iter().enumerate() {
-            self.mem.print_char(byte, addr + index as u16);
-        }
-        for index in 0..32u16 {
-            self.mem.write(ATTR_FILE + 16 * 32 + index, 71);
-        }
     }
 
     /// Advance one frame.
@@ -212,7 +203,13 @@ impl Game {
         if self.entities.draw(&mut self.mem) {
             self.kill();
         }
+        // The clock moves on when the frame counter wraps, as the original's
+        // 35401 does.
         self.minute = self.minute.wrapping_add(1);
+        if self.minute == 0 {
+            self.clock.tick();
+        }
+        self.draw_hud();
         self.present();
     }
 
@@ -333,6 +330,20 @@ impl Game {
 
         here == self.room.tile(crate::room::Kind::Nasty).attr
     }
+    /// The bottom third of the screen: room name, items, clock and lives.
+    fn draw_hud(&mut self) {
+        let name = self.room.name;
+        let frame = (self.minute / 8) as usize;
+        crate::hud::draw(
+            &mut self.mem,
+            &name,
+            self.items.collected,
+            &self.clock,
+            self.lives,
+            frame,
+        );
+    }
+
     /// Copy the working buffers to the screen the front end reads.
     fn present(&mut self) {
         self.mem.copy(ATTR_BUF, ATTR_FILE, PLAY_ATTRS);

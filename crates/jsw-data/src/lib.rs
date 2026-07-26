@@ -7,6 +7,7 @@
 //! Jet Set Willy is Copyright (c) 1984 Software Projects Ltd.
 
 pub mod entities;
+pub mod hud;
 pub mod items;
 pub mod rooms;
 pub mod sprites;
