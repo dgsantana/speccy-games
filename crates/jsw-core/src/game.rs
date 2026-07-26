@@ -12,6 +12,7 @@ use speccy::memory::{ATTR_FILE, DISPLAY, Memory};
 use speccy::sound::SoundQueue;
 
 use crate::entity::Entities;
+use crate::item::Items;
 use crate::room::Room;
 use crate::willy::{self, Outcome, Willy};
 
@@ -49,6 +50,10 @@ pub struct Game {
     /// returns him to the doorway rather than to where the game began.
     willy_on_entry: Willy,
     pub entities: Entities,
+    pub items: Items,
+    /// The clock, which the original counts in minutes from seven in the
+    /// morning. It paces the item colours; the display of it is milestone 2c.
+    pub minute: u8,
     pub lives: u8,
     pub mode: Mode,
     pub sounds: SoundQueue,
@@ -76,6 +81,8 @@ impl Game {
             willy: Willy::default(),
             willy_on_entry: Willy::default(),
             entities: Entities::default(),
+            items: Items::new(),
+            minute: 0,
             lives: STARTING_LIVES,
             mode: Mode::Playing,
             sounds: SoundQueue::default(),
@@ -187,11 +194,25 @@ impl Game {
             self.present();
             return;
         }
+        // Items come after Willy, because collecting one is decided by finding
+        // white ink in its cell and only Willy's drawing puts white ink there.
+        let taken = self.items.draw(
+            self.room.number,
+            self.minute,
+            &self.room.item,
+            &mut self.mem,
+        );
+        for _ in 0..taken {
+            // A short high blip per item, as the original's 37897 makes.
+            self.sounds.note(16, 4);
+        }
+
         // Guardians are drawn over Willy and report touching him, which is how
         // the original detects the collision.
         if self.entities.draw(&mut self.mem) {
             self.kill();
         }
+        self.minute = self.minute.wrapping_add(1);
         self.present();
     }
 
@@ -528,6 +549,39 @@ mod tests {
             arrived,
             "he should reappear where he entered the room"
         );
+    }
+
+    #[test]
+    fn walking_into_an_item_collects_it() {
+        let mut game = Game::new();
+        // The Watch Tower holds the first four items.
+        game.goto_room(50);
+        let item = (crate::item::FIRST..256)
+            .find(|&n| game.items.room_of(n) == 50)
+            .expect("the Watch Tower has items");
+
+        // Put Willy on the item's own cell, so his drawing forces white ink
+        // into it exactly as walking into it would.
+        let cell = game.items.cell_of(item);
+        let offset = cell - ATTR_BUF;
+        game.willy = Willy {
+            y: (offset / 32) as u8 * willy::ROW_UNITS,
+            cell,
+            ..Willy::default()
+        };
+
+        assert!(game.items.present(item));
+        game.update(speccy::Input::default());
+        assert!(!game.items.present(item), "he walked through it");
+        assert_eq!(game.items.collected, 1);
+        assert_eq!(game.items.remaining(), 82);
+    }
+
+    #[test]
+    fn a_new_game_has_every_item_to_find() {
+        let game = Game::new();
+        assert_eq!(game.items.remaining(), 83);
+        assert_eq!(game.items.collected, 0);
     }
 
     #[test]
