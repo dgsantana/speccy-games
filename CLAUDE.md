@@ -115,7 +115,22 @@ cargo run -p mm-core --example dump_frames -- /tmp/frames
 
 That writes binary PPM files for the title screen and a handful of caverns.
 Comparing them against screenshots of the original is the fastest way to catch a
-regression in tile or attribute handling.
+regression in tile or attribute handling. Jet Set Willy has the same:
+
+```bash
+cargo run -p jsw-core --example dump_rooms -- /tmp/rooms      # a PPM per room
+cargo run -p jsw-core --example room_info -- 33               # exits, ramp, conveyor
+cargo run -p jsw-core --example entity_info -- 27             # its guardians
+cargo run -p jsw-core --features debug --example trace_walk -- 33 40  # Willy per frame
+cargo run -p jsw-core --example map -- docs/jsw-mansion.svg   # the whole house
+```
+
+`map` lays the mansion out by walking the rooms' own exits from the one Willy
+starts in, so it shows the game's geography rather than a guess at it. The
+committed copy is [docs/jsw-mansion.svg](docs/jsw-mansion.svg). It also lists
+the exits that do not fit a grid, which are real: the Back Door, Back Stairway
+and Wine Cellar loop across the house, and rooms mostly use room 0 to mean "no
+exit that way" rather than "The Off Licence".
 
 ## Conventions
 

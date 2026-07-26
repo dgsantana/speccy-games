@@ -1,0 +1,238 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="642"
+viewBox="0 0 2000 642" font-family="monospace">
+<style>
+  .room { fill: #12121a; stroke: #4a4a68; }
+  .start { fill: #1d2b1d; stroke: #6fbf6f; stroke-width: 2; }
+  .num { fill: #8f8fb0; font-size: 11px; }
+  .name { fill: #e8e8f0; font-size: 11px; }
+  .odd { stroke: #d08040; stroke-width: 2; fill: none; }
+  text { dominant-baseline: hanging; }
+</style>
+<rect width="2000" height="642" fill="#08080c"/>
+<text x="10" y="10" fill="#b0b0d0" font-size="14px">Jet Set Willy: the mansion,
+laid out by the rooms' own exits</text>
+<path class="odd" d="M 1792 521 Q 1858 481 1924 521"/>
+<path class="odd" d="M 1792 521 Q 1858 481 1924 521"/>
+<path class="odd" d="M 1396 521 Q 1330 518 1264 595"/>
+<path class="odd" d="M 1264 595 Q 1066 333 868 151"/>
+<path class="odd" d="M 1264 595 Q 1264 518 1264 521"/>
+<path class="odd" d="M 1396 373 Q 1330 370 1264 447"/>
+<path class="odd" d="M 868 151 Q 934 259 1000 447"/>
+<path class="odd" d="M 736 151 Q 736 111 736 151"/>
+<path class="odd" d="M 736 151 Q 736 111 736 151"/>
+<path class="odd" d="M 472 151 Q 472 111 472 151"/>
+<path class="odd" d="M 1132 521 Q 1330 296 1528 151"/>
+<path class="odd" d="M 604 225 Q 670 222 736 299"/>
+<path class="odd" d="M 1660 595 Q 1132 444 604 373"/>
+<path class="odd" d="M 1660 595 Q 1198 444 736 373"/>
+<path class="odd" d="M 1660 595 Q 1000 370 340 225"/>
+<path class="odd" d="M 472 151 Q 472 111 472 151"/>
+<path class="odd" d="M 1528 151 Q 1330 296 1132 521"/>
+<path class="odd" d="M 1528 151 Q 868 259 208 447"/>
+<path class="odd" d="M 208 447 Q 802 222 1396 77"/>
+<path class="odd" d="M 208 447 Q 868 259 1528 151"/>
+<path class="odd" d="M 1396 77 Q 802 222 208 447"/>
+<path class="odd" d="M 1396 77 Q 736 185 76 373"/>
+<path class="odd" d="M 76 373 Q 736 185 1396 77"/>
+<rect class="room" x="1861" y="487" width="126" height="68" rx="4"/>
+<text class="num" x="1867" y="493">0</text>
+<text class="name" x="1867" y="509">The Off Licence</text>
+<rect class="room" x="1729" y="487" width="126" height="68" rx="4"/>
+<text class="num" x="1735" y="493">1</text>
+<text class="name" x="1735" y="509">The Bridge</text>
+<rect class="room" x="1597" y="487" width="126" height="68" rx="4"/>
+<text class="num" x="1603" y="493">2</text>
+<text class="name" x="1603" y="509">Under the</text>
+<text class="name" x="1603" y="522">MegaTree</text>
+<rect class="room" x="1465" y="487" width="126" height="68" rx="4"/>
+<text class="num" x="1471" y="493">3</text>
+<text class="name" x="1471" y="509">At the Foot of</text>
+<text class="name" x="1471" y="522">the MegaTree</text>
+<rect class="room" x="1333" y="487" width="126" height="68" rx="4"/>
+<text class="num" x="1339" y="493">4</text>
+<text class="name" x="1339" y="509">The Drive</text>
+<rect class="room" x="1201" y="487" width="126" height="68" rx="4"/>
+<text class="num" x="1207" y="493">5</text>
+<text class="name" x="1207" y="509">The Security</text>
+<text class="name" x="1207" y="522">Guard</text>
+<rect class="room" x="1201" y="561" width="126" height="68" rx="4"/>
+<text class="num" x="1207" y="567">6</text>
+<text class="name" x="1207" y="583">Entrance to Hades</text>
+<rect class="room" x="1597" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="1603" y="419">7</text>
+<text class="name" x="1603" y="435">Cuckoo's Nest</text>
+<rect class="room" x="1465" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="1471" y="419">8</text>
+<text class="name" x="1471" y="435">Inside the</text>
+<text class="name" x="1471" y="448">MegaTrunk</text>
+<rect class="room" x="1333" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="1339" y="419">9</text>
+<text class="name" x="1339" y="435">On a Branch Over</text>
+<text class="name" x="1339" y="448">the Drive</text>
+<rect class="room" x="1201" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="1207" y="419">10</text>
+<text class="name" x="1207" y="435">The Front Door</text>
+<rect class="room" x="1069" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="1075" y="419">11</text>
+<text class="name" x="1075" y="435">The Hall</text>
+<rect class="room" x="1465" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="1471" y="345">12</text>
+<text class="name" x="1471" y="361">Tree Top</text>
+<rect class="room" x="1333" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="1339" y="345">13</text>
+<text class="name" x="1339" y="361">Out on a limb</text>
+<rect class="room" x="805" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="811" y="123">14</text>
+<text class="name" x="811" y="139">Rescue Esmerelda</text>
+<rect class="room" x="673" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="679" y="123">15</text>
+<text class="name" x="679" y="139">I'm sure I've</text>
+<text class="name" x="679" y="152">seen this</text>
+<text class="name" x="679" y="165">before..</text>
+<rect class="room" x="673" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="679" y="123">16</text>
+<text class="name" x="679" y="139">We must perform a</text>
+<text class="name" x="679" y="152">Quirkafleeg</text>
+<rect class="room" x="541" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="547" y="123">17</text>
+<text class="name" x="547" y="139">Up on the</text>
+<text class="name" x="547" y="152">Battlements</text>
+<rect class="room" x="409" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="415" y="123">18</text>
+<text class="name" x="415" y="139">On the Roof</text>
+<rect class="room" x="1069" y="487" width="126" height="68" rx="4"/>
+<text class="num" x="1075" y="493">19</text>
+<text class="name" x="1075" y="509">The Forgotten</text>
+<text class="name" x="1075" y="522">Abbey</text>
+<rect class="room" x="937" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="943" y="419">20</text>
+<text class="name" x="943" y="435">Ballroom East</text>
+<rect class="room" x="805" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="811" y="419">21</text>
+<text class="name" x="811" y="435">Ballroom West</text>
+<rect class="room" x="673" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="679" y="419">22</text>
+<text class="name" x="679" y="435">To the Kitchens</text>
+<text class="name" x="679" y="448">Main Stairway</text>
+<rect class="room" x="541" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="547" y="419">23</text>
+<text class="name" x="547" y="435">The Kitchen</text>
+<rect class="room" x="409" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="415" y="419">24</text>
+<text class="name" x="415" y="435">West of Kitchen</text>
+<rect class="room" x="277" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="283" y="419">25</text>
+<text class="name" x="283" y="435">Cold Store</text>
+<rect class="room" x="937" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="943" y="345">26</text>
+<text class="name" x="943" y="361">East Wall Base</text>
+<rect class="room" x="805" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="811" y="345">27</text>
+<text class="name" x="811" y="361">The Chapel</text>
+<rect class="room" x="673" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="679" y="345">28</text>
+<text class="name" x="679" y="361">First Landing</text>
+<rect class="room" x="541" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="547" y="345">29</text>
+<text class="name" x="547" y="361">The Nightmare</text>
+<text class="name" x="547" y="374">Room</text>
+<rect class="room" x="409" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="415" y="345">30</text>
+<text class="name" x="415" y="361">The Banyan Tree</text>
+<rect class="room" x="277" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="283" y="345">31</text>
+<text class="name" x="283" y="361">Swimming Pool</text>
+<rect class="room" x="937" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="943" y="271">32</text>
+<text class="name" x="943" y="287">Halfway up the</text>
+<text class="name" x="943" y="300">East Wall</text>
+<rect class="start" x="805" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="811" y="271">33</text>
+<text class="name" x="811" y="287">The Bathroom</text>
+<rect class="room" x="673" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="679" y="271">34</text>
+<text class="name" x="679" y="287">Top Landing</text>
+<rect class="room" x="541" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="547" y="271">35</text>
+<text class="name" x="547" y="287">Master Bedroom</text>
+<rect class="room" x="409" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="415" y="271">36</text>
+<text class="name" x="415" y="287">A bit of tree</text>
+<rect class="room" x="277" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="283" y="271">37</text>
+<text class="name" x="283" y="287">Orangery</text>
+<rect class="room" x="937" y="191" width="126" height="68" rx="4"/>
+<text class="num" x="943" y="197">38</text>
+<text class="name" x="943" y="213">Priests' Hole</text>
+<rect class="room" x="805" y="191" width="126" height="68" rx="4"/>
+<text class="num" x="811" y="197">39</text>
+<text class="name" x="811" y="213">Emergency</text>
+<text class="name" x="811" y="226">Generator</text>
+<rect class="room" x="673" y="191" width="126" height="68" rx="4"/>
+<text class="num" x="679" y="197">40</text>
+<text class="name" x="679" y="213">Dr Jones will</text>
+<text class="name" x="679" y="226">never believe</text>
+<text class="name" x="679" y="239">this</text>
+<rect class="room" x="541" y="191" width="126" height="68" rx="4"/>
+<text class="num" x="547" y="197">41</text>
+<text class="name" x="547" y="213">The Attic</text>
+<rect class="room" x="409" y="191" width="126" height="68" rx="4"/>
+<text class="num" x="415" y="197">42</text>
+<text class="name" x="415" y="213">Under the Roof</text>
+<rect class="room" x="277" y="191" width="126" height="68" rx="4"/>
+<text class="num" x="283" y="197">43</text>
+<text class="name" x="283" y="213">Conservatory Roof</text>
+<rect class="room" x="937" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="943" y="123">44</text>
+<text class="name" x="943" y="139">On top of the</text>
+<text class="name" x="943" y="152">house</text>
+<rect class="room" x="1333" y="561" width="126" height="68" rx="4"/>
+<text class="num" x="1339" y="567">45</text>
+<text class="name" x="1339" y="583">Under the Drive</text>
+<rect class="room" x="1465" y="561" width="126" height="68" rx="4"/>
+<text class="num" x="1471" y="567">46</text>
+<text class="name" x="1471" y="583">Tree Root</text>
+<rect class="room" x="1597" y="561" width="126" height="68" rx="4"/>
+<text class="num" x="1603" y="567">47</text>
+<text class="name" x="1603" y="583">[</text>
+<rect class="room" x="409" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="415" y="123">48</text>
+<text class="name" x="415" y="139">Nomen Luni</text>
+<rect class="room" x="1465" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="1471" y="123">49</text>
+<text class="name" x="1471" y="139">The Wine Cellar</text>
+<rect class="room" x="673" y="43" width="126" height="68" rx="4"/>
+<text class="num" x="679" y="49">50</text>
+<text class="name" x="679" y="65">Watch Tower</text>
+<rect class="room" x="1333" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="1339" y="123">51</text>
+<text class="name" x="1339" y="139">Tool Shed</text>
+<rect class="room" x="145" y="413" width="126" height="68" rx="4"/>
+<text class="num" x="151" y="419">52</text>
+<text class="name" x="151" y="435">Back Stairway</text>
+<rect class="room" x="1333" y="43" width="126" height="68" rx="4"/>
+<text class="num" x="1339" y="49">53</text>
+<text class="name" x="1339" y="65">Back Door</text>
+<rect class="room" x="145" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="151" y="345">54</text>
+<text class="name" x="151" y="361">West Wing</text>
+<rect class="room" x="13" y="339" width="126" height="68" rx="4"/>
+<text class="num" x="19" y="345">55</text>
+<text class="name" x="19" y="361">West Bedroom</text>
+<rect class="room" x="145" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="151" y="271">56</text>
+<text class="name" x="151" y="287">West Wing Roof</text>
+<rect class="room" x="13" y="265" width="126" height="68" rx="4"/>
+<text class="num" x="19" y="271">57</text>
+<text class="name" x="19" y="287">Above the West</text>
+<text class="name" x="19" y="300">Bedroom</text>
+<rect class="room" x="1201" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="1207" y="123">58</text>
+<text class="name" x="1207" y="139">The Beach</text>
+<rect class="room" x="1069" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="1075" y="123">59</text>
+<text class="name" x="1075" y="139">The Yacht</text>
+<rect class="room" x="937" y="117" width="126" height="68" rx="4"/>
+<text class="num" x="943" y="123">60</text>
+<text class="name" x="943" y="139">The Bow</text>
+</svg>
