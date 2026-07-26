@@ -11,6 +11,8 @@ fn main() {
 
     let mut game = Game::new();
     game.goto_room(room);
+    // Guardians would kill him before the movement is worth watching.
+    game.debug.no_guardians = true;
 
     // Optional starting cell, for walking into a particular feature.
     if let (Some(row), Some(column)) = (

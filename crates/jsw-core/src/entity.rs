@@ -37,6 +37,11 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// The kind of an entity from its first byte.
+    pub fn of_public(first: u8) -> Self {
+        Self::of(first)
+    }
+
     fn of(first: u8) -> Self {
         match first & 7 {
             0 => Self::Unused,
@@ -330,6 +335,30 @@ mod tests {
             .filter(|&cell| mem.read(ATTR_BUF + cell as u16) != 0)
             .count();
         assert!(coloured > 0, "no guardian was coloured in");
+    }
+
+    #[test]
+    fn a_guardian_on_a_high_sprite_page_is_actually_drawn() {
+        // First Landing's guardian keeps its graphics on page 180, well past the
+        // 2048 bytes the data used to carry, so it was silently skipped: the
+        // cells were coloured as it passed but nothing was ever drawn in them.
+        let room = Room::load(28);
+        let entities = Entities::load(&room);
+        assert_eq!(entities.buffers[0][5], 180, "the page this test is about");
+
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+        let before: u32 = (0..4096)
+            .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
+            .sum();
+        entities.draw(&mut mem);
+        let after: u32 = (0..4096)
+            .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
+            .sum();
+        assert!(
+            after > before,
+            "the guardian coloured its cells but drew no pixels"
+        );
     }
 
     #[test]

@@ -47,6 +47,9 @@ FIRST_ITEM = 173
 WILLY_SPRITES = 0x9D00
 MARIA_SPRITE = 0x9C80
 GUARDIAN_GRAPHICS = 0xAB00
+# The graphics run from there to the room definitions at 49152. Guardians name
+# pages as high as 0xBA, so anything shorter loses them.
+GUARDIAN_GRAPHICS_LEN = ROOMS - GUARDIAN_GRAPHICS
 TOILET_GRAPHICS = 0xA600
 ROPE_TABLE = 0x8300
 SCREEN_TABLE = 0x8200
@@ -138,7 +141,7 @@ def verify(memory, snapshot_path):
         ("entity definitions", ENTITY_DEFS, 128 * ENTITY_DEF_SIZE, 255),
         ("item table", ITEM_TABLE, 512, 255 - collected),
         ("Willy's sprites", WILLY_SPRITES, 256, 255),
-        ("guardian graphics", GUARDIAN_GRAPHICS, 2048, 255),
+        ("guardian graphics", GUARDIAN_GRAPHICS, GUARDIAN_GRAPHICS_LEN, 255),
     ]
     bad = 0
     for name, start, length, mask in regions:
@@ -255,9 +258,11 @@ def main():
              "Eight 16x16 Willy frames: four facing right, then four facing left.")
         emit(f, "MARIA", "u8", [128], list(memory[MARIA_SPRITE:MARIA_SPRITE + 128]),
              "Maria, who waits in the master bedroom.")
-        emit(f, "GUARDIANS", "u8", [2048],
-             list(memory[GUARDIAN_GRAPHICS:GUARDIAN_GRAPHICS + 2048]),
-             "Guardian graphics: 64 sprites of 32 bytes.")
+        emit(f, "GUARDIANS", "u8", [GUARDIAN_GRAPHICS_LEN],
+             list(memory[GUARDIAN_GRAPHICS:GUARDIAN_GRAPHICS + GUARDIAN_GRAPHICS_LEN]),
+             "Guardian graphics, from 43776 up to the room definitions. A "
+             "guardian names its page in the sixth byte of its buffer, and "
+             "those pages run all the way to 49152.")
         emit(f, "TOILET", "u8", [256], list(memory[TOILET_GRAPHICS:TOILET_GRAPHICS + 256]),
              "The toilet, and Willy being sick into it.")
 

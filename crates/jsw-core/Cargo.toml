@@ -18,3 +18,10 @@ speccy.workspace = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "trace_walk"
+required-features = ["debug"]
+
+[[example]]
+name = "dump_rooms"

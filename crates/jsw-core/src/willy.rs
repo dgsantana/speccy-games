@@ -32,9 +32,19 @@ pub mod facing {
 /// The left-right movement table at 33825.
 ///
 /// Indexed by the current facing-and-moving value plus 0 for no input, 4 for
-/// left and 8 for right. Turning around costs a frame: pressing left while
-/// facing right only turns him, it does not move him.
-pub const MOVEMENT: [u8; 12] = [0, 1, 0, 1, 1, 3, 1, 3, 2, 0, 2, 0];
+/// left, 8 for right and 12 for both at once. Turning around costs a frame:
+/// pressing left while facing right only turns him, it does not move him.
+///
+/// The last four entries are the both-at-once case and leave him exactly as he
+/// was. That is not a curiosity: a conveyor pushing one way while the player
+/// holds the other lands here, which is the only way to climb the Chapel's
+/// ramp, every cell of which reads as conveyor.
+pub const MOVEMENT: [u8; 16] = [
+    0, 1, 0, 1, // nothing pressed
+    1, 3, 1, 3, // left
+    2, 0, 2, 0, // right
+    0, 1, 2, 3, // both: no change
+];
 
 /// What happened to Willy this frame that the room cannot deal with itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,14 +278,16 @@ impl Willy {
             }
         }
 
-        let input_index = if left {
-            4
-        } else if right {
-            8
-        } else {
-            0
-        };
-        self.flags = MOVEMENT[input_index + self.flags as usize];
+        // The original sets bit 2 for left and bit 3 for right, so both at once
+        // gives 12 and lands in the table's last four entries.
+        let mut direction = 0usize;
+        if left {
+            direction = 4;
+        }
+        if right {
+            direction |= 8;
+        }
+        self.flags = MOVEMENT[direction + self.flags as usize];
 
         if input.jump && self.airborne == 0 {
             self.jump_counter = 0;
@@ -565,6 +577,39 @@ mod tests {
             willy.position(),
             start,
             "he stood still on the Chapel ramp; the original will not let him"
+        );
+    }
+
+    #[test]
+    fn the_chapel_ramp_can_still_be_climbed_against_the_shove() {
+        // Every cell of the Chapel's ramp reads as conveyor, so the shove is
+        // always on. Holding the other way must still work: both directions at
+        // once lands in the movement table's last four entries, which leave
+        // Willy as he was, so he keeps climbing.
+        let (room, mut mem) = staged(27);
+        // The Chapel's floor is rows 14 and 15, so standing on it puts his cell
+        // at row 12. The ramp's foot is a few columns to his right.
+        let mut willy = Willy {
+            y: 12 * ROW_UNITS,
+            cell: ATTR_BUF + 12 * COLUMNS as u16 + 12,
+            flags: facing::MOVING,
+            frame: 3,
+            ..Willy::default()
+        };
+        let go_right = Input {
+            right: true,
+            ..Input::default()
+        };
+
+        let start_row = willy.position().0;
+        for _ in 0..24 {
+            willy.update(&room, &mut mem, go_right);
+        }
+        assert!(
+            willy.position().0 < start_row,
+            "he could not climb the Chapel ramp: row {} -> {}",
+            start_row,
+            willy.position().0
         );
     }
 
