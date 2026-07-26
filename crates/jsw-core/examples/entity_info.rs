@@ -7,6 +7,12 @@ fn main() {
         .skip(1)
         .filter_map(|a| a.parse().ok())
         .collect();
+    let rooms = if rooms.is_empty() {
+        (0..jsw_core::ROOM_COUNT).collect()
+    } else {
+        rooms
+    };
+
     for number in rooms {
         let room = Room::load(number);
         let entities = Entities::load(&room);

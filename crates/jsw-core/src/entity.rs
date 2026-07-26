@@ -6,7 +6,8 @@
 //! entity: [`Entities::step`] is the mover at 37056 and [`Entities::draw`] the
 //! drawer at 37310.
 //!
-//! Ropes and arrows are recognised and left alone for now.
+//! Ropes are recognised and left alone for now: Willy can hang from one, so
+//! they reach into his state rather than being purely scenery.
 
 use speccy::layout::{ATTR_BUF, COLUMNS, ROWS};
 use speccy::memory::{DrawMode, Memory, addr_of};
@@ -137,21 +138,28 @@ impl Entities {
         }
     }
 
-    /// Draw every guardian, reporting whether one of them touched Willy: the
-    /// routine at 37310.
-    pub fn draw(&self, mem: &mut Memory) -> bool {
+    /// Draw everything, reporting whether it touched Willy: the routine at
+    /// 37310.
+    ///
+    /// Arrows are flown here rather than in [`Entities::step`], because that is
+    /// where the original flies them: the mover keeps only two bits of the type
+    /// and an arrow's four reads as zero there.
+    pub fn draw(&mut self, mem: &mut Memory) -> bool {
         if !self.active() {
             return false;
         }
         let mut hit = false;
-        for (_, buffer) in self.live() {
-            match Kind::of(buffer[0]) {
+        for slot in 0..SLOTS {
+            if self.buffers[slot][0] == 255 {
+                break;
+            }
+            match Kind::of(self.buffers[slot][0]) {
                 Kind::Horizontal | Kind::Vertical | Kind::Other => {
-                    hit |= draw_guardian(buffer, mem);
+                    hit |= draw_guardian(&self.buffers[slot], mem);
                 }
-                // Ropes and arrows are drawn by their own routines, which are
-                // not written yet.
-                Kind::Rope | Kind::Arrow | Kind::Unused => {}
+                Kind::Arrow => hit |= fly_arrow(&mut self.buffers[slot], mem),
+                // Ropes swing, and Willy can hang from them; not yet ported.
+                Kind::Rope | Kind::Unused => {}
             }
         }
         hit
@@ -214,6 +222,51 @@ fn step_vertical(buffer: &mut [u8; BUFFER]) {
     }
     buffer[3] = buffer[6];
     buffer[4] = buffer[4].wrapping_neg();
+}
+
+/// Fly an arrow one step and draw it, reporting that it has hit Willy.
+///
+/// The routine at 37431. An arrow is three pixel rows: a feather byte above and
+/// below, and a solid shaft between them. Its x-coordinate is a whole byte, so
+/// it spends most of its flight off the screen and only appears while the low
+/// five bits are the whole of it.
+fn fly_arrow(buffer: &mut [u8; BUFFER], mem: &mut Memory) -> bool {
+    // Bit 7 says which way it goes.
+    if buffer[0] & 128 == 0 {
+        buffer[4] = buffer[4].wrapping_sub(1);
+    } else {
+        buffer[4] = buffer[4].wrapping_add(1);
+    }
+
+    let x = buffer[4];
+    if x & 224 != 0 {
+        // Off the screen; nothing to draw and nothing to hit.
+        return false;
+    }
+
+    let y = buffer[2];
+    let low = jsw_data::entities::SCREEN_TABLE[y as usize].wrapping_add(x);
+    let attr = addr_of(92 | ((y & 128) >> 7), low);
+    if !in_play(attr) {
+        return false;
+    }
+
+    // White ink already in the cell means Willy is there, and only then does the
+    // arrow's shaft count as having hit him.
+    let armed = mem.read(attr) & 7 == 7;
+    mem.write(attr, mem.read(attr) | 7);
+
+    // The shaft sits on the row the table names; the feathers a row either side.
+    let page = jsw_data::entities::SCREEN_TABLE[y.wrapping_add(1) as usize];
+    let shaft = addr_of(page, low);
+    let above = addr_of(page.wrapping_sub(1), low);
+    let below = addr_of(page.wrapping_add(1), low);
+
+    mem.write(above, buffer[6]);
+    let hit = armed && mem.read(shaft) != 0;
+    mem.write(shaft, 255);
+    mem.write(below, buffer[6]);
+    hit
 }
 
 /// Colour a guardian's cells and draw its sprite, reporting a collision.
@@ -332,7 +385,7 @@ mod tests {
     #[test]
     fn drawing_guardians_puts_ink_on_the_screen() {
         let room = Room::load(0);
-        let entities = Entities::load(&room);
+        let mut entities = Entities::load(&room);
         let mut mem = Memory::new();
         room.draw(&mut mem);
 
@@ -349,7 +402,7 @@ mod tests {
         // 2048 bytes the data used to carry, so it was silently skipped: the
         // cells were coloured as it passed but nothing was ever drawn in them.
         let room = Room::load(28);
-        let entities = Entities::load(&room);
+        let mut entities = Entities::load(&room);
         assert_eq!(entities.buffers[0][5], 180, "the page this test is about");
 
         let mut mem = Memory::new();
@@ -371,7 +424,7 @@ mod tests {
     fn a_guardian_keeps_the_rooms_paper_colour() {
         // Its cells must not turn black in a room whose background is not.
         let room = Room::load(28);
-        let entities = Entities::load(&room);
+        let mut entities = Entities::load(&room);
         let mut mem = Memory::new();
         room.draw(&mut mem);
         mem.copy(
@@ -391,6 +444,84 @@ mod tests {
         let after = mem.read(attr);
         assert_eq!(after & 56, 8 * 2, "the guardian blacked out the background");
         assert_ne!(after & 7, 0, "the guardian has no ink of its own");
+    }
+
+    /// A room with an arrow in it, and the slot the arrow is in.
+    fn a_room_with_an_arrow() -> (Room, usize) {
+        for number in 0..jsw_data::ROOM_COUNT {
+            let room = Room::load(number);
+            if !room.is_real() {
+                continue;
+            }
+            let entities = Entities::load(&room);
+            if let Some(slot) = entities
+                .kinds()
+                .iter()
+                .position(|&kind| kind == Kind::Arrow)
+            {
+                return (room, slot);
+            }
+        }
+        panic!("no room has an arrow");
+    }
+
+    #[test]
+    fn an_arrow_flies_across_the_room() {
+        let (room, slot) = a_room_with_an_arrow();
+        let mut entities = Entities::load(&room);
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+        mem.copy(
+            speccy::layout::ATTR_BACK,
+            ATTR_BUF,
+            speccy::layout::PLAY_ATTRS,
+        );
+
+        // Arrows are flown by the drawing pass, not the mover.
+        let before = entities.buffers[slot][4];
+        entities.step();
+        assert_eq!(
+            entities.buffers[slot][4], before,
+            "the mover should leave arrows alone"
+        );
+        entities.draw(&mut mem);
+        assert_ne!(entities.buffers[slot][4], before, "the arrow did not move");
+
+        // Somewhere in a full sweep it must cross the screen and be drawn.
+        let mut drawn = false;
+        for _ in 0..256 {
+            let was: u32 = (0..4096)
+                .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
+                .sum();
+            entities.draw(&mut mem);
+            let now: u32 = (0..4096)
+                .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
+                .sum();
+            if now != was {
+                drawn = true;
+                break;
+            }
+        }
+        assert!(drawn, "the arrow never appeared on the screen");
+    }
+
+    #[test]
+    fn an_arrow_only_kills_where_there_is_white_ink() {
+        let (room, slot) = a_room_with_an_arrow();
+        let mut entities = Entities::load(&room);
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+
+        // With nothing in its way it never reports a hit.
+        for _ in 0..300 {
+            assert!(
+                !entities.draw(&mut mem),
+                "the arrow hit something that was not there"
+            );
+            // Keep the buffer clear of its own shaft, as a new frame would.
+            mem.fill(speccy::layout::SCREEN_BUF, speccy::layout::PLAY_PIXELS, 0);
+            let _ = slot;
+        }
     }
 
     #[test]
