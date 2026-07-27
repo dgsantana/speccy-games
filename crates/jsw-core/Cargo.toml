@@ -24,6 +24,10 @@ name = "trace_walk"
 required-features = ["debug"]
 
 [[example]]
+name = "trace_rope"
+required-features = ["debug"]
+
+[[example]]
 name = "dump_rooms"
 required-features = ["debug"]
 

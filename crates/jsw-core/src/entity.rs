@@ -1,4 +1,4 @@
-//! The things in a room that move: guardians, and later ropes and arrows.
+//! The things in a room that move: guardians, ropes and arrows.
 //!
 //! A room names up to eight of them, each as a definition number and a column.
 //! Entering a room copies the eight-byte definition into a buffer and drops the
@@ -6,13 +6,14 @@
 //! entity: [`Entities::step`] is the mover at 37056 and [`Entities::draw`] the
 //! drawer at 37310.
 //!
-//! Ropes are recognised and left alone for now: Willy can hang from one, so
-//! they reach into his state rather than being purely scenery.
+//! A rope is the odd one out: it swings rather than walks, and it can pick Willy
+//! up, so both passes hand it over to [`crate::rope`].
 
 use speccy::layout::{ATTR_BUF, COLUMNS, ROWS};
 use speccy::memory::{DrawMode, Memory, addr_of};
 
 use crate::room::Room;
+use crate::willy::Willy;
 
 /// Entity slots in a room.
 pub const SLOTS: usize = 8;
@@ -22,7 +23,7 @@ pub const BUFFER: usize = 8;
 
 /// Where the guardian graphics start, so a sprite page byte can be turned into
 /// an index into the table.
-const GRAPHICS_BASE: usize = 0xAB00;
+const GRAPHICS_BASE: usize = 0x9C00;
 
 /// What an entity is, from bits 0 to 2 of its first byte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +61,10 @@ impl Kind {
 pub struct Entities {
     /// Eight buffers of eight bytes. A first byte of 255 ends the list.
     pub buffers: [[u8; BUFFER]; SLOTS],
+    /// Whether the rope in this slot has hold of Willy. The original keeps this
+    /// in bit 0 of the fourth byte of the *next* slot's buffer, having run out
+    /// of room in the rope's own; see [`crate::rope::draw`].
+    holding: [bool; SLOTS],
     /// Debug switch: leave every guardian still and harmless.
     #[cfg(feature = "debug")]
     pub disabled: bool,
@@ -69,6 +74,7 @@ impl Default for Entities {
     fn default() -> Self {
         Self {
             buffers: [[0; BUFFER]; SLOTS],
+            holding: [false; SLOTS],
             #[cfg(feature = "debug")]
             disabled: false,
         }
@@ -119,10 +125,11 @@ impl Entities {
     }
 
     /// Move every guardian one frame: the routine at 37056.
+    ///
+    /// A rope keeps swinging even with the guardians switched off: it is part of
+    /// the room rather than something out to kill him, and a room with a frozen
+    /// rope in it cannot be crossed at all.
     pub fn step(&mut self) {
-        if !self.active() {
-            return;
-        }
         for slot in 0..SLOTS {
             if self.buffers[slot][0] == 255 {
                 break;
@@ -130,9 +137,9 @@ impl Entities {
             // The mover keeps only bits 0 and 1, so an arrow or an unused slot
             // reads as zero here and is skipped.
             match self.buffers[slot][0] & 3 {
-                1 => step_horizontal(&mut self.buffers[slot]),
-                2 => step_vertical(&mut self.buffers[slot]),
-                // Ropes swing; not yet ported.
+                3 => crate::rope::step(&mut self.buffers[slot]),
+                1 if self.active() => step_horizontal(&mut self.buffers[slot]),
+                2 if self.active() => step_vertical(&mut self.buffers[slot]),
                 _ => {}
             }
         }
@@ -144,22 +151,40 @@ impl Entities {
     /// Arrows are flown here rather than in [`Entities::step`], because that is
     /// where the original flies them: the mover keeps only two bits of the type
     /// and an arrow's four reads as zero there.
-    pub fn draw(&mut self, mem: &mut Memory) -> bool {
-        if !self.active() {
-            return false;
-        }
+    ///
+    /// Ropes are drawn here too, and a rope moves Willy about, which is why this
+    /// takes him. `has_room_above` is whether the room has a neighbour above to
+    /// climb into; a rope stops short when it has not.
+    pub fn draw(
+        &mut self,
+        mem: &mut Memory,
+        willy: &mut Willy,
+        has_room_above: bool,
+        sounds: &mut speccy::sound::SoundQueue,
+    ) -> bool {
         let mut hit = false;
         for slot in 0..SLOTS {
             if self.buffers[slot][0] == 255 {
                 break;
             }
             match Kind::of(self.buffers[slot][0]) {
-                Kind::Horizontal | Kind::Vertical | Kind::Other => {
+                Kind::Horizontal | Kind::Vertical | Kind::Other if self.active() => {
                     hit |= draw_guardian(&self.buffers[slot], mem);
                 }
-                Kind::Arrow => hit |= fly_arrow(&mut self.buffers[slot], mem),
-                // Ropes swing, and Willy can hang from them; not yet ported.
-                Kind::Rope | Kind::Unused => {}
+                Kind::Arrow if self.active() => {
+                    hit |= fly_arrow(&mut self.buffers[slot], mem, sounds);
+                }
+                Kind::Rope => {
+                    crate::rope::draw(
+                        &self.buffers[slot],
+                        &mut self.holding[slot],
+                        willy,
+                        has_room_above,
+                        mem,
+                    );
+                }
+                // Unused, or a guardian with the guardians switched off.
+                _ => {}
             }
         }
         hit
@@ -230,15 +255,32 @@ fn step_vertical(buffer: &mut [u8; BUFFER]) {
 /// below, and a solid shaft between them. Its x-coordinate is a whole byte, so
 /// it spends most of its flight off the screen and only appears while the low
 /// five bits are the whole of it.
-fn fly_arrow(buffer: &mut [u8; BUFFER], mem: &mut Memory) -> bool {
-    // Bit 7 says which way it goes.
-    if buffer[0] & 128 == 0 {
+fn fly_arrow(
+    buffer: &mut [u8; BUFFER],
+    mem: &mut Memory,
+    sounds: &mut speccy::sound::SoundQueue,
+) -> bool {
+    // Bit 7 says which way it goes, and where along its flight it whistles.
+    let whistles_at = if buffer[0] & 128 == 0 {
         buffer[4] = buffer[4].wrapping_sub(1);
+        44
     } else {
         buffer[4] = buffer[4].wrapping_add(1);
-    }
+        244
+    };
 
     let x = buffer[4];
+    if x == whistles_at {
+        // The original's delay counter runs from 128 down to 1, so the whistle
+        // rises rather than being one note. It is made well off the screen, at
+        // a point in the flight that has nothing to do with where the arrow is
+        // drawn.
+        for pitch in [128, 96, 64, 32] {
+            sounds.note(pitch, 2);
+        }
+        return false;
+    }
+
     if x & 224 != 0 {
         // Off the screen; nothing to draw and nothing to hit.
         return false;
@@ -331,6 +373,17 @@ fn in_play(attr: u16) -> bool {
 mod tests {
     use super::*;
 
+    /// Draw a pass with a Willy who is not being tested, for the guardian and
+    /// arrow tests. A rope would move him, so he is fresh every time.
+    fn draw_all(entities: &mut Entities, mem: &mut Memory) -> bool {
+        entities.draw(
+            mem,
+            &mut Willy::default(),
+            true,
+            &mut speccy::sound::SoundQueue::default(),
+        )
+    }
+
     #[test]
     fn the_off_licence_has_three_guardians() {
         // Its entity list is 10, 12, 44 and then the terminator.
@@ -389,7 +442,7 @@ mod tests {
         let mut mem = Memory::new();
         room.draw(&mut mem);
 
-        entities.draw(&mut mem);
+        draw_all(&mut entities, &mut mem);
         let coloured = (0..(ROWS * COLUMNS))
             .filter(|&cell| mem.read(ATTR_BUF + cell as u16) != 0)
             .count();
@@ -410,7 +463,7 @@ mod tests {
         let before: u32 = (0..4096)
             .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
             .sum();
-        entities.draw(&mut mem);
+        draw_all(&mut entities, &mut mem);
         let after: u32 = (0..4096)
             .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
             .sum();
@@ -435,12 +488,11 @@ mod tests {
 
         // Give the guardian's first cell a paper colour to carry.
         let buffer = entities.buffers[0];
-        let low = jsw_data::entities::SCREEN_TABLE[buffer[3] as usize]
-            .wrapping_add(buffer[2] & 31);
+        let low = jsw_data::entities::SCREEN_TABLE[buffer[3] as usize].wrapping_add(buffer[2] & 31);
         let attr = speccy::memory::addr_of(92 | (buffer[3] >> 7), low);
         mem.write(attr, 8 * 2); // paper 2, ink 0
 
-        entities.draw(&mut mem);
+        draw_all(&mut entities, &mut mem);
         let after = mem.read(attr);
         assert_eq!(after & 56, 8 * 2, "the guardian blacked out the background");
         assert_ne!(after & 7, 0, "the guardian has no ink of its own");
@@ -484,7 +536,7 @@ mod tests {
             entities.buffers[slot][4], before,
             "the mover should leave arrows alone"
         );
-        entities.draw(&mut mem);
+        draw_all(&mut entities, &mut mem);
         assert_ne!(entities.buffers[slot][4], before, "the arrow did not move");
 
         // Somewhere in a full sweep it must cross the screen and be drawn.
@@ -493,7 +545,7 @@ mod tests {
             let was: u32 = (0..4096)
                 .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
                 .sum();
-            entities.draw(&mut mem);
+            draw_all(&mut entities, &mut mem);
             let now: u32 = (0..4096)
                 .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
                 .sum();
@@ -515,13 +567,74 @@ mod tests {
         // With nothing in its way it never reports a hit.
         for _ in 0..300 {
             assert!(
-                !entities.draw(&mut mem),
+                !draw_all(&mut entities, &mut mem),
                 "the arrow hit something that was not there"
             );
             // Keep the buffer clear of its own shaft, as a new frame would.
             mem.fill(speccy::layout::SCREEN_BUF, speccy::layout::PLAY_PIXELS, 0);
             let _ = slot;
         }
+    }
+
+    #[test]
+    fn every_guardian_in_the_mansion_is_actually_drawn() {
+        // A guardian's page can be below the graphics the guardians mostly use:
+        // Ballroom East's barrel, Top Landing's, and everything in The
+        // Nightmare Room are on page 156, with the foot and Maria. Those were
+        // coloured and never drawn, so all you saw was a block of colour moving
+        // over the room - on Willy, the barrel turned him red.
+        for number in 0..jsw_data::ROOM_COUNT {
+            let room = Room::load(number);
+            if !room.is_real() {
+                continue;
+            }
+            let mut entities = Entities::load(&room);
+            for (slot, kind) in entities.kinds().iter().copied().enumerate() {
+                if !matches!(kind, Kind::Horizontal | Kind::Vertical | Kind::Other) {
+                    continue;
+                }
+                let mut mem = Memory::new();
+                let mut lit = 0;
+                // A vertical guardian passes through its whole range, and only
+                // some of that is on the screen, so give it a few frames.
+                for _ in 0..8 {
+                    mem.fill(speccy::layout::SCREEN_BUF, speccy::layout::PLAY_PIXELS, 0);
+                    draw_guardian(&entities.buffers[slot], &mut mem);
+                    lit += (0..4096)
+                        .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
+                        .sum::<u32>();
+                    entities.step();
+                }
+                assert!(
+                    lit > 0,
+                    "the guardian in slot {slot} of room {number} ({}) is on page {} \
+                     and draws nothing",
+                    room.title,
+                    entities.buffers[slot][5]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_arrow_whistles_once_a_flight() {
+        let (room, slot) = a_room_with_an_arrow();
+        let mut entities = Entities::load(&room);
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+
+        // The whistle is made at one x-coordinate of the 256 it passes through,
+        // and it is nowhere near the part of the flight that is on the screen.
+        let mut heard = 0;
+        for _ in 0..256 {
+            let mut sounds = speccy::sound::SoundQueue::default();
+            entities.draw(&mut mem, &mut Willy::default(), true, &mut sounds);
+            if sounds.drain().count() > 0 {
+                heard += 1;
+            }
+        }
+        assert_eq!(heard, 1, "the arrow whistled {heard} times in one flight");
+        let _ = slot;
     }
 
     #[test]
@@ -533,7 +646,7 @@ mod tests {
             room.draw(&mut mem);
             for _ in 0..40 {
                 entities.step();
-                entities.draw(&mut mem);
+                draw_all(&mut entities, &mut mem);
             }
         }
     }

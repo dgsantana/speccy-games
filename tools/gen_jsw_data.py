@@ -46,13 +46,28 @@ FIRST_ITEM = 173
 
 WILLY_SPRITES = 0x9D00
 MARIA_SPRITE = 0x9C80
-GUARDIAN_GRAPHICS = 0xAB00
-# The graphics run from there to the room definitions at 49152. Guardians name
-# pages as high as 0xBA, so anything shorter loses them.
+# The foot and the barrel of the game over sequence, which are also guardians
+# in The Nightmare Room, Ballroom East and Top Landing.
+FOOT_SPRITE = 0x9C40
+BARREL_SPRITE = 0x9C60
+# Guardians name a page in the sixth byte of their buffer and the game reads
+# that page of memory, wherever it is. Most of them point into the block from
+# 0xAB00 up to the room definitions, but nine of them - Ballroom East's barrel,
+# Top Landing's, and every one in The Nightmare Room - are on page 0x9C, which
+# is where the foot, the barrel and Maria live. So the window has to start
+# there, and it takes in Willy's sprites, the entity definitions and the item
+# table on the way past, exactly as the machine's memory does.
+GUARDIAN_GRAPHICS = 0x9C00
 GUARDIAN_GRAPHICS_LEN = ROOMS - GUARDIAN_GRAPHICS
 TOILET_GRAPHICS = 0xA600
 ROPE_TABLE = 0x8300
 SCREEN_TABLE = 0x8200
+# Moonlight Sonata for the title screen, terminated by 255, and If I Were a
+# Rich Man for the game itself, which runs round and round.
+THEME_TUNE = 0x85FB
+THEME_TUNE_LEN = 100
+GAME_TUNE = 0x865F
+GAME_TUNE_LEN = 64
 HUD_ATTRS = 39424
 
 HEAD = """\
@@ -142,7 +157,10 @@ def verify(memory, snapshot_path):
         ("entity definitions", ENTITY_DEFS, 128 * ENTITY_DEF_SIZE, 255),
         ("item table", ITEM_TABLE, 512, 255 - collected),
         ("Willy's sprites", WILLY_SPRITES, 256, 255),
-        ("guardian graphics", GUARDIAN_GRAPHICS, GUARDIAN_GRAPHICS_LEN, 255),
+        # The guardian window spans the item table on its way up, and those
+        # flags are live state, so it is checked either side of it instead.
+        ("guardian graphics", GUARDIAN_GRAPHICS, ITEM_TABLE - GUARDIAN_GRAPHICS, 255),
+        ("guardian graphics (2)", ITEM_TABLE + 512, ROOMS - ITEM_TABLE - 512, 255),
     ]
     bad = 0
     for name, start, length, mask in regions:
@@ -250,6 +268,17 @@ def main():
              "Attributes for the bottom third of the screen, where the room "
              "name, the item count, the clock and the lives are shown.")
 
+    with open(os.path.join(OUT, "music.rs"), "w") as f:
+        f.write(HEAD)
+        emit(f, "THEME", "u8", [THEME_TUNE_LEN],
+             list(memory[THEME_TUNE:THEME_TUNE + THEME_TUNE_LEN]),
+             "Moonlight Sonata, played over the title screen. Each byte is a "
+             "pitch delay, and 255 ends it.")
+        emit(f, "GAME", "u8", [GAME_TUNE_LEN],
+             list(memory[GAME_TUNE:GAME_TUNE + GAME_TUNE_LEN]),
+             "If I Were a Rich Man, played while the game runs. Each byte is a "
+             "pitch delay, and the tune repeats for ever.")
+
     with open(os.path.join(OUT, "items.rs"), "w") as f:
         f.write(HEAD)
         f.write("/// The lowest numbered item. Items below this are not in the game.\n")
@@ -265,11 +294,17 @@ def main():
              "Eight 16x16 Willy frames: four facing right, then four facing left.")
         emit(f, "MARIA", "u8", [128], list(memory[MARIA_SPRITE:MARIA_SPRITE + 128]),
              "Maria, who waits in the master bedroom.")
+        emit(f, "FOOT", "u8", [32], list(memory[FOOT_SPRITE:FOOT_SPRITE + 32]),
+             "The foot that comes down on the barrel when the game is over.")
+        emit(f, "BARREL", "u8", [32], list(memory[BARREL_SPRITE:BARREL_SPRITE + 32]),
+             "The barrel Willy stands on while the game is over.")
         emit(f, "GUARDIANS", "u8", [GUARDIAN_GRAPHICS_LEN],
              list(memory[GUARDIAN_GRAPHICS:GUARDIAN_GRAPHICS + GUARDIAN_GRAPHICS_LEN]),
-             "Guardian graphics, from 43776 up to the room definitions. A "
+             "Guardian graphics, from 39936 up to the room definitions. A "
              "guardian names its page in the sixth byte of its buffer, and "
-             "those pages run all the way to 49152.")
+             "those pages run from 156 - the foot, the barrel and Maria - all "
+             "the way to 49152, so the window takes in Willy's sprites, the "
+             "entity definitions and the item table on the way past.")
         emit(f, "TOILET", "u8", [256], list(memory[TOILET_GRAPHICS:TOILET_GRAPHICS + 256]),
              "The toilet, and Willy being sick into it.")
 
@@ -286,6 +321,7 @@ def main():
 pub mod entities;
 pub mod hud;
 pub mod items;
+pub mod music;
 pub mod rooms;
 pub mod sprites;
 
@@ -299,7 +335,7 @@ pub const ROOM_SIZE: usize = 256;
 pub const ITEM_COUNT: usize = 83;
 """)
 
-    print(f"wrote {OUT}/rooms.rs, entities.rs, items.rs, sprites.rs, lib.rs")
+    print(f"wrote {OUT}/rooms.rs, entities.rs, items.rs, sprites.rs, music.rs, hud.rs, lib.rs")
 
 
 def check(memory):

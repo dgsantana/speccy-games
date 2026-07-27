@@ -7,19 +7,22 @@
 //! any window, GPU or audio device: the machine is [`speccy`], and this crate is
 //! only what Software Projects wrote.
 
+pub mod bedroom;
 pub mod cartridge;
 pub mod entity;
 pub mod game;
+pub mod gameover;
 pub mod hud;
 pub mod item;
 pub mod map;
 pub mod room;
+pub mod rope;
 pub mod willy;
 
-pub use game::{FRAMES_PER_SECOND, Game};
-pub use jsw_data::ROOM_COUNT;
 pub use entity::Entities;
+pub use game::{FRAMES_PER_SECOND, Game};
 pub use hud::Clock;
 pub use item::Items;
+pub use jsw_data::ROOM_COUNT;
 pub use room::Room;
 pub use willy::Willy;

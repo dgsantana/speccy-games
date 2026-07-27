@@ -19,6 +19,11 @@ pub const FATAL_FALL: u8 = 12;
 /// Frames in a jump.
 pub const JUMP_FRAMES: u8 = 18;
 
+/// What the rope status indicator is set to the moment Willy leaves a rope. It
+/// counts up from there and wraps to zero sixteen frames later, which is how
+/// long a rope refuses to catch him again.
+pub const LET_GO: u8 = 240;
+
 /// Facing and moving, the two bits the original keeps in one byte at 34256.
 ///
 /// The values matter: they index [`MOVEMENT`].
@@ -76,6 +81,14 @@ pub struct Willy {
     pub airborne: u8,
     /// How far into a jump he is, 0 to [`JUMP_FRAMES`].
     pub jump_counter: u8,
+    /// The rope status indicator, the original's byte at 34262: 0 when he is
+    /// nowhere near a rope, 3 to 32 while he clings to that segment of one, and
+    /// 240 to 255 for the sixteen frames after he lets go, during which the
+    /// rope will not take hold of him again.
+    ///
+    /// It is not one of the seven bytes saved on entering a room; the original
+    /// clears it there instead, and so does [`crate::game::Game`].
+    pub rope: u8,
 }
 
 /// Where a new game puts him: (13,20) in The Bathroom, with y=208, which is
@@ -93,6 +106,7 @@ impl Default for Willy {
             frame: 0,
             airborne: 0,
             jump_counter: 0,
+            rope: 0,
         }
     }
 }
@@ -106,6 +120,17 @@ impl Willy {
 
     pub fn facing_left(&self) -> bool {
         self.flags & facing::LEFT != 0
+    }
+
+    /// Whether he is hanging from a rope.
+    ///
+    /// The original decrements the status indicator and tests bit 7, so the
+    /// values that count as "on a rope" are 1 to 128 - in practice 3 to 32, the
+    /// segments a rope can hold him by. The letting-go values from 240 up fail
+    /// this test, which is what makes gravity take him again while the drawing
+    /// pass still refuses to catch him.
+    pub fn on_rope(&self) -> bool {
+        self.rope.wrapping_sub(1) & 128 == 0
     }
 
     /// How far below his y-coordinate he is actually drawn, in the same half
@@ -153,6 +178,15 @@ impl Willy {
 
     /// Advance one frame: gravity first, then the keys.
     pub fn update(&mut self, room: &Room, mem: &mut speccy::Memory, input: Input) -> Outcome {
+        // Hanging from a rope, none of gravity applies: the original jumps
+        // straight from the top of 36307 to the keyboard at 36564, and the rope
+        // itself moves him when it is drawn. Walking is skipped too, in
+        // [`Willy::walk`].
+        if self.on_rope() {
+            self.read_keys(room, mem, input);
+            return Outcome::None;
+        }
+
         // Counters 13 and 16 are the points on the way down where his sprite is
         // exactly two and one cell-heights above where the jump started, so
         // they are cell-aligned and worth testing for ground. Without them he
@@ -167,15 +201,17 @@ impl Willy {
         }
 
         if check_ground {
+            // The height that kills is tested inside this, on landing, and only
+            // there: the original reaches that test at 36564 by having found
+            // ground. Falling past the fatal counter is not itself fatal, which
+            // matters because the counter is reached by any drop of more than
+            // ten frames - including one that ends in the room below.
             match self.settle(room, mem) {
                 Outcome::None => {}
                 other => return other,
             }
         }
 
-        if self.airborne >= FATAL_FALL {
-            return Outcome::Died;
-        }
         self.read_keys(room, mem, input);
         self.walk(room, mem)
     }
@@ -262,7 +298,9 @@ impl Willy {
         let mut right = input.right;
 
         // A conveyor under his feet pushes him whether or not a key is held.
-        if self.airborne == 0 && self.y & 14 == 0 {
+        // There is no floor under him on a rope, and the original skips the
+        // whole test then.
+        if self.airborne == 0 && self.y & 14 == 0 && !self.on_rope() {
             let (row, column) = self.position();
             if row + 2 < ROWS {
                 let conveyor = room.tile(Kind::Conveyor).attr;
@@ -289,9 +327,21 @@ impl Willy {
         }
         self.flags = MOVEMENT[direction + self.flags as usize];
 
-        if input.jump && self.airborne == 0 {
+        if input.jump && (self.airborne == 0 || self.on_rope()) {
             self.jump_counter = 0;
             self.airborne = 1;
+
+            if self.on_rope() {
+                // Letting go: the rope will not take him again for sixteen
+                // frames, and he is squared up to a cell boundary first so the
+                // jump starts from a whole row rather than from wherever the
+                // swing had left him.
+                self.rope = LET_GO;
+                self.y &= 240;
+                // Bit 1 set, so the jump carries him in the direction he faces
+                // whether or not a key is held.
+                self.flags |= facing::MOVING;
+            }
         }
     }
 
@@ -347,9 +397,7 @@ impl Willy {
         // A wall in the way stops him where he stands.
         let wall = room.tile(Kind::Wall).attr;
         let ahead = if rightwards { target + 1 } else { target };
-        if cell_attr(mem, new_row, ahead) == wall
-            || cell_attr(mem, new_row + 1, ahead) == wall
-        {
+        if cell_attr(mem, new_row, ahead) == wall || cell_attr(mem, new_row + 1, ahead) == wall {
             return Outcome::None;
         }
 
@@ -397,6 +445,17 @@ impl Willy {
         }
     }
 
+    /// Running for the toilet he goes right whatever the player does, and will
+    /// not jump: the original forces bit 0 of its keyboard reading at 36593 and
+    /// skips the jump keys at 36752.
+    pub fn errand_input() -> Input {
+        Input {
+            left: false,
+            right: true,
+            jump: false,
+        }
+    }
+
     /// Put him where the original puts him when he arrives from another room.
     pub fn enter_from(&mut self, direction: Outcome) {
         match direction {
@@ -419,7 +478,7 @@ impl Willy {
         }
     }
 
-    fn set_column(&mut self, column: usize) {
+    pub(crate) fn set_column(&mut self, column: usize) {
         let (row, _) = self.position();
         self.cell = ATTR_BUF + (row * COLUMNS + column) as u16;
     }
@@ -473,6 +532,85 @@ mod tests {
         assert_eq!(willy.y, 208);
         assert_eq!(willy.position(), (13, 20));
         assert_eq!(willy.cell, 23988);
+    }
+
+    #[test]
+    fn gravity_leaves_him_alone_while_he_is_on_a_rope() {
+        // Nothing holds him up in mid-air but the rope, and the rope is drawn
+        // after this runs, so falling here would drop him through it.
+        let (room, mut mem) = staged(33);
+        let mut willy = Willy {
+            y: 5 * ROW_UNITS,
+            cell: ATTR_BUF + 5 * COLUMNS as u16 + 10,
+            rope: 20,
+            ..Willy::default()
+        };
+        let before = willy;
+
+        for _ in 0..8 {
+            assert_eq!(
+                willy.update(&room, &mut mem, Input::default()),
+                Outcome::None
+            );
+        }
+        assert_eq!(willy.y, before.y, "he fell off the rope");
+        assert_eq!(willy.airborne, 0);
+        assert_eq!(willy.cell, before.cell);
+    }
+
+    #[test]
+    fn he_cannot_walk_along_a_rope_by_himself() {
+        // Moving along a rope is the rope's business, at 37726; the walking
+        // routine returns early.
+        let (room, mut mem) = staged(33);
+        let mut willy = Willy {
+            y: 5 * ROW_UNITS,
+            cell: ATTR_BUF + 5 * COLUMNS as u16 + 10,
+            rope: 20,
+            flags: facing::LEFT | facing::MOVING,
+            ..Willy::default()
+        };
+        let go_left = Input {
+            left: true,
+            ..Input::default()
+        };
+
+        for _ in 0..8 {
+            willy.update(&room, &mut mem, go_left);
+        }
+        assert_eq!(willy.position(), (5, 10), "he walked off along the rope");
+    }
+
+    #[test]
+    fn jumping_lets_go_of_the_rope() {
+        let (room, mut mem) = staged(33);
+        let mut willy = Willy {
+            // Half a cell down, so the squaring up has something to do.
+            y: 5 * ROW_UNITS + 8,
+            cell: ATTR_BUF + 5 * COLUMNS as u16 + 10,
+            rope: 20,
+            flags: facing::LEFT,
+            ..Willy::default()
+        };
+
+        willy.update(
+            &room,
+            &mut mem,
+            Input {
+                jump: true,
+                ..Input::default()
+            },
+        );
+
+        assert_eq!(willy.rope, LET_GO, "he is still holding on");
+        assert!(!willy.on_rope());
+        assert_eq!(willy.airborne, 1, "he should be jumping");
+        assert_eq!(willy.y % ROW_UNITS, 0, "he should be squared up to a cell");
+        assert_ne!(
+            willy.flags & facing::MOVING,
+            0,
+            "a jump off a rope carries him the way he faces"
+        );
     }
 
     #[test]
@@ -646,8 +784,68 @@ mod tests {
         for _ in 0..3 {
             willy.update(&room, &mut mem, Input::default());
         }
-        assert!(willy.y > start, "he did not fall: y {} -> {}", start, willy.y);
+        assert!(
+            willy.y > start,
+            "he did not fall: y {} -> {}",
+            start,
+            willy.y
+        );
         assert!(willy.airborne >= 2);
+    }
+
+    #[test]
+    fn a_long_fall_kills_him_on_landing_and_not_before() {
+        // The original only tests the height at 36564, which is reached when
+        // the ground has been found. Falling past the counter that makes a
+        // landing fatal is not itself fatal - and it happens on any drop of
+        // more than ten frames, including one that ends in the room below.
+        let (room, mut mem) = staged(0);
+        let mut willy = Willy {
+            y: 2 * ROW_UNITS,
+            cell: ATTR_BUF + 2 * COLUMNS as u16 + 2,
+            ..Willy::default()
+        };
+
+        let background = room.tile(Kind::Background).attr;
+        let mut fell_far = false;
+        for frame in 0..40 {
+            let (row, column) = willy.position();
+            let in_mid_air = row + 2 < ROWS
+                && cell_attr(&mem, row + 2, column) == background
+                && cell_attr(&mem, row + 2, column + 1) == background;
+
+            let outcome = willy.update(&room, &mut mem, Input::default());
+            fell_far |= willy.airborne >= FATAL_FALL;
+            match outcome {
+                Outcome::Died => {
+                    assert!(!in_mid_air, "he died in mid-air on frame {frame}");
+                    break;
+                }
+                // He reached the bottom of the room, which is the other way a
+                // long drop can end.
+                Outcome::Below => break,
+                _ => {}
+            }
+        }
+        assert!(fell_far, "he never fell far enough to be worth testing");
+
+        // Landing from that height is what kills him. Put a floor under him.
+        let (room, mut mem) = staged(0);
+        let mut willy = Willy {
+            y: 5 * ROW_UNITS,
+            cell: ATTR_BUF + 5 * COLUMNS as u16 + 2,
+            airborne: FATAL_FALL,
+            ..Willy::default()
+        };
+        let floor = room.tile(Kind::Floor).attr;
+        for column in 0..COLUMNS {
+            mem.write(ATTR_BUF + (7 * COLUMNS + column) as u16, floor);
+        }
+        assert_eq!(
+            willy.update(&room, &mut mem, Input::default()),
+            Outcome::Died,
+            "he walked away from a fatal landing"
+        );
     }
 
     #[test]

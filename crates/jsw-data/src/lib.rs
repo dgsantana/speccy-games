@@ -9,6 +9,7 @@
 pub mod entities;
 pub mod hud;
 pub mod items;
+pub mod music;
 pub mod rooms;
 pub mod sprites;
 
