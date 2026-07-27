@@ -393,8 +393,14 @@ impl Game {
             input,
             &mut self.sounds,
         );
-        if alive {
-            alive = !willy::draw(&self.willy, &self.cavern, &mut self.mem);
+        if alive && willy::draw(&self.willy, &self.cavern, &mut self.mem) {
+            // A nasty in one of the cells he covers, found while colouring
+            // them: the original's 37471 goes to KILLWILLY, which sets the
+            // airborne indicator to 255. Without that he stood in it for ever
+            // and the guardians, the items and the specials went undrawn every
+            // frame, because the rest of the loop is skipped once he is hit.
+            self.willy.kill();
+            alive = false;
         }
         if alive && self.guardians.draw_horizontal(&self.cavern, &mut self.mem) {
             self.willy.kill();
@@ -841,6 +847,30 @@ mod tests {
         }
         assert_eq!(game.mode, Mode::Playing);
         assert_eq!(game.willy.lives, 3);
+    }
+
+    #[test]
+    fn standing_in_a_nasty_kills_him_rather_than_hiding_the_guardians() {
+        let mut game = Game::new();
+        game.update(Input {
+            start: true,
+            ..Input::default()
+        });
+        game.sounds.clear();
+
+        // Put a nasty in the cell under his feet, in the empty-cavern buffer so
+        // it survives the frame starting over.
+        let nasty = game.cavern.tile_attr(mm_data::TileKind::Nasty1);
+        let under = game.willy.location + 64;
+        game.mem.write(under, nasty);
+        game.mem.write(under - ATTR_BUF + ATTR_BACK, nasty);
+
+        game.update(Input::default());
+        game.sounds.clear();
+        assert!(
+            matches!(game.mode, Mode::Dying { .. }),
+            "a nasty under him went unpunished"
+        );
     }
 
     #[test]
