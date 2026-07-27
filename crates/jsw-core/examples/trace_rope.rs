@@ -26,7 +26,7 @@ fn main() {
         std::process::exit(1);
     };
 
-    let mut game = Game::new();
+    let mut game = Game::started();
     game.goto_room(room);
     game.debug.no_guardians = true;
     game.debug.invulnerable = true;

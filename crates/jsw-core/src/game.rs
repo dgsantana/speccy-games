@@ -7,9 +7,11 @@
 //! in its cell; ropes are drawn before them because a rope finds Willy by
 //! looking for pixels already on the screen.
 //!
-//! The sequences the original runs as blocking loops — dying, the foot coming
-//! down at the end of the game — are [`Mode`] variants advanced a step per
-//! frame, because a blocking loop would freeze the window.
+//! The sequences the original runs as blocking loops — the title screen, dying,
+//! the foot coming down at the end of the game — are [`Mode`] variants advanced
+//! a step per frame, because a blocking loop would freeze the window. A game
+//! starts on its title screen and goes back to it when the night ends, either
+//! way round; only Escape leaves for the picker.
 
 use speccy::layout::{
     ATTR_BACK, ATTR_BUF, COLUMNS, PLAY_ATTRS, PLAY_PIXELS, ROWS, SCREEN_BACK, SCREEN_BUF,
@@ -31,15 +33,30 @@ pub const FRAMES_PER_SECOND: f32 = 17.0;
 /// The room Willy starts in: The Bathroom.
 pub const START_ROOM: usize = 33;
 
-/// Frames the death sequence lasts.
-const DEATH_FRAMES: u8 = 16;
+/// Frames the death sequence lasts: the loop at 35708 fills the attribute file
+/// with 71 down to 64, one value a pass, so it is one frame per ink colour.
+const DEATH_FRAMES: u8 = 7;
 
 /// Lives a new game starts with, from the original's 34784.
 pub const STARTING_LIVES: u8 = 7;
 
+/// Duration units elapsed per frame, in 1/256ths.
+///
+/// The theme tune is far slower than the game: half a note of it lasts 146ms
+/// against a 59ms frame, so notes cannot advance once a frame. This clock keeps
+/// the fraction, so the tempo is right on average and the error never piles up.
+const TUNE_UNITS_PER_FRAME: u32 = (256.0 / (FRAMES_PER_SECOND * 256.0 / 62_500.0)) as u32;
+
 /// What the game is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
+    /// The title screen: play the theme, then scroll the message round and
+    /// round until Enter is pressed. `half` counts halves of a note of the
+    /// tune, `scroll` characters of the message.
+    Title {
+        half: usize,
+        scroll: usize,
+    },
     Playing,
     /// Willy has had a fatal accident; the original flashes him and drops him
     /// back into the room. Counts down.
@@ -90,6 +107,9 @@ pub struct Game {
     pub debug: speccy::Debug,
     /// Edge detection so a held key does not repeat.
     prev_input: speccy::Input,
+    /// How far into the current half-note of the theme tune, in 1/256ths of a
+    /// duration unit. Only the title screen uses it.
+    tune_clock: u32,
 }
 
 impl Default for Game {
@@ -99,7 +119,16 @@ impl Default for Game {
 }
 
 impl Game {
+    /// A new game, sitting on its title screen as the original does.
     pub fn new() -> Self {
+        let mut game = Self::started();
+        game.show_title();
+        game
+    }
+
+    /// A game already under way, in The Bathroom at seven in the morning. This
+    /// is what pressing Enter on the title screen leads to.
+    pub fn started() -> Self {
         let mut game = Self {
             mem: Memory::new(),
             room: Room::load(START_ROOM),
@@ -121,9 +150,29 @@ impl Game {
             #[cfg(feature = "debug")]
             debug: speccy::Debug::default(),
             prev_input: speccy::Input::default(),
+            tune_clock: 0,
         };
         game.enter_room(START_ROOM);
         game
+    }
+
+    /// Back to the title screen, which is where the original goes when the game
+    /// is over and when one in the morning comes round: everything is set up
+    /// again from 34762, and the picture is drawn.
+    fn show_title(&mut self) {
+        let paused = self.paused;
+        let music_off = self.music_off;
+        #[cfg(feature = "debug")]
+        let debug = self.debug;
+        *self = Self::started();
+        self.paused = paused;
+        self.music_off = music_off;
+        #[cfg(feature = "debug")]
+        {
+            self.debug = debug;
+        }
+        self.mode = Mode::Title { half: 0, scroll: 0 };
+        crate::title::draw(&mut self.mem);
     }
 
     /// The border colour of the room being played, or of the colours running
@@ -131,6 +180,10 @@ impl Game {
     pub fn border(&self) -> u8 {
         if self.paused {
             self.mem.read(ATTR_FILE) & 7
+        } else if matches!(self.mode, Mode::Title { .. }) {
+            // The title screen leaves the border black; the original only ever
+            // touches it there as a side effect of making a sound.
+            0
         } else {
             self.room.border
         }
@@ -202,8 +255,13 @@ impl Game {
         self.sync_debug();
 
         // The game over sequence has the screen to itself: it draws straight
-        // into the display file, so none of the room's buffers are copied.
+        // into the display file, so none of the room's buffers are copied. So
+        // does the title screen.
         match self.mode {
+            Mode::Title { half, scroll } => {
+                self.update_title(pressed, half, scroll);
+                return;
+            }
             Mode::GameOver(distance) => {
                 self.update_game_over(distance);
                 return;
@@ -215,19 +273,18 @@ impl Game {
             _ => {}
         }
 
+        // Dying happens on the screen as it stands: the original's loop at
+        // 35708 only recolours the attribute file, so the room, the guardians
+        // and Willy stay exactly where they were when he was hit. Copying the
+        // empty room in would wipe all of them off.
+        if let Mode::Dying(step) = self.mode {
+            self.update_dying(step);
+            return;
+        }
+
         // Every frame starts from the empty room and redraws what moves.
         self.mem.copy(ATTR_BACK, ATTR_BUF, PLAY_ATTRS);
         self.mem.copy(SCREEN_BACK, SCREEN_BUF, PLAY_PIXELS);
-
-        if let Mode::Dying(step) = self.mode {
-            self.update_dying(step);
-            // Running out of lives puts the game over screen straight into the
-            // display file, and blitting the room would paint over it.
-            if !matches!(self.mode, Mode::GameOver(_)) {
-                self.present();
-            }
-            return;
-        }
 
         self.entities.step();
 
@@ -246,7 +303,9 @@ impl Game {
                 jump: input.jump,
             }
         };
-        let outcome = self.willy.update(&self.room, &mut self.mem, wanted);
+        let outcome = self
+            .willy
+            .update(&self.room, &mut self.mem, wanted, &mut self.sounds);
         if outcome == Outcome::Died {
             self.kill();
             self.present();
@@ -338,8 +397,13 @@ impl Game {
             &mut self.mem,
         );
         for _ in 0..taken {
-            // A short high blip per item, as the original's 37897 makes.
-            self.sounds.note(16, 4);
+            // The blip at 37897 is a sweep, not a note: the original counts
+            // down from 128 in twos and delays 144 less the counter each pass,
+            // so the pitch falls the whole way through. Four notes are enough
+            // to hear it as one chirp.
+            for pitch in [16, 48, 80, 112] {
+                self.sounds.note(pitch, 5);
+            }
         }
         if taken > 0 && self.items.remaining() == 0 {
             // Every item in: Maria stands aside. The original sets the mode
@@ -354,8 +418,9 @@ impl Game {
             self.clock.tick();
             if self.clock.past_bedtime() {
                 // One in the morning, and the original drops back to its title
-                // screen whatever Willy has managed. Here that is the picker.
-                self.quit = true;
+                // screen whatever Willy has managed.
+                self.show_title();
+                return;
             }
         }
 
@@ -371,6 +436,53 @@ impl Game {
         self.present();
     }
 
+    /// The title screen, from 34965: the theme tune, and then the message
+    /// scrolling across the bottom with the colours running through the
+    /// picture. Enter starts the game at any point, and reaching the end of the
+    /// message starts the whole thing again.
+    fn update_title(&mut self, input: speccy::Input, half: usize, scroll: usize) {
+        if input.start {
+            self.mode = Mode::Playing;
+            // Entering the room clears the bottom third of the screen, which
+            // the title screen has been scrolling its message across.
+            self.enter_room(START_ROOM);
+            self.present();
+            return;
+        }
+
+        if let Some((pitch, duration)) = crate::title::note(half) {
+            // True on the first frame of each half-note: the clock never
+            // carries a whole frame of credit into a new one.
+            if self.tune_clock < TUNE_UNITS_PER_FRAME && !self.music_off {
+                self.sounds.note(pitch, duration);
+            }
+            self.tune_clock += TUNE_UNITS_PER_FRAME;
+            let length = u32::from(duration) * 256;
+            if self.tune_clock >= length {
+                self.tune_clock -= length;
+                self.mode = Mode::Title {
+                    half: half + 1,
+                    scroll,
+                };
+            }
+            return;
+        }
+
+        // The tune is over, so the message scrolls. The original cycles the
+        // colours of the whole screen as it goes, which is what makes the
+        // picture crawl.
+        self.cycle_attrs();
+        crate::title::scroll(&mut self.mem, scroll, &mut self.sounds);
+        if scroll + 1 == crate::title::SCROLL_STEPS {
+            self.show_title();
+        } else {
+            self.mode = Mode::Title {
+                half,
+                scroll: scroll + 1,
+            };
+        }
+    }
+
     /// A fatal accident: the original sets the airborne indicator to 255 and
     /// drops back into the main loop, which starts the death sequence.
     fn kill(&mut self) {
@@ -383,13 +495,24 @@ impl Game {
 
     /// Flash through the death sequence, then put him back in the room he died
     /// in, one life the poorer.
+    ///
+    /// The loop at 35708. `step` is the ink colour, counting 7 down to 0: each
+    /// pass fills the top two thirds of the *attribute file* - not the working
+    /// buffer - with 64 + step, so the picture already on the screen fades from
+    /// white to black without being redrawn.
     fn update_dying(&mut self, step: u8) {
-        // A rising note per step, as the original's death sound does.
-        self.sounds.note(step.wrapping_mul(4) | 7, 8);
+        self.mem.fill(ATTR_FILE, PLAY_ATTRS, 64 | step);
+
+        // The note's pitch and its length both come from the ink colour: the
+        // original derives a delay of 63 - 8*step and repeats it 8 + 32*step
+        // times, so the sound falls and shortens as the screen darkens. One of
+        // our duration units is 256 iterations of that delay loop.
+        let pitch = ((7 - step) << 3) | 7;
+        let iterations = u32::from(8 + 32 * u16::from(step)) * u32::from(pitch);
+        self.sounds.note(pitch, ((iterations / 256) as u8).max(1));
 
         if step > 0 {
             self.mode = Mode::Dying(step - 1);
-            let _ = self.draw_willy();
             return;
         }
 
@@ -438,12 +561,12 @@ impl Game {
         };
     }
 
-    /// The message glistening, and then back to the picker - which is where the
-    /// original's title screen would be.
+    /// The message glistening, and then back to the title screen, which is
+    /// where the original goes from here.
     fn update_game_over_message(&mut self, step: u8) {
         gameover::glisten(step, &mut self.mem);
         if step == 0 {
-            self.quit = true;
+            self.show_title();
         } else {
             self.mode = Mode::GameOverMessage(step - 1);
         }
@@ -638,14 +761,14 @@ mod tests {
 
     #[test]
     fn a_new_game_starts_in_the_bathroom() {
-        let game = Game::new();
+        let game = Game::started();
         assert_eq!(game.room.number, START_ROOM);
         assert_eq!(game.room.title, "The Bathroom");
     }
 
     #[test]
     fn the_room_is_drawn_to_the_display_file() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.update(speccy::Input::default());
         let pixels: u32 = (0..4096)
             .map(|i| game.mem.read(DISPLAY + i).count_ones())
@@ -655,7 +778,7 @@ mod tests {
 
     #[test]
     fn walking_off_an_edge_changes_room() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         let start = game.room.number;
         // Put him at the left edge, already moving, so the next step leaves.
         game.willy = Willy {
@@ -676,7 +799,7 @@ mod tests {
     #[test]
     fn every_room_can_be_entered_and_stepped() {
         for number in 0..jsw_data::ROOM_COUNT {
-            let mut game = Game::new();
+            let mut game = Game::started();
             game.room = Room::load(number);
             game.enter_room(number);
             for _ in 0..20 {
@@ -688,7 +811,7 @@ mod tests {
 
     #[test]
     fn willy_takes_white_ink_and_leaves_the_paper_alone() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         let background = game.room.tile(crate::room::Kind::Background).attr;
 
         // Half a cell down, so his sprite reaches into a third row of cells.
@@ -724,7 +847,7 @@ mod tests {
 
     #[test]
     fn the_third_row_is_only_coloured_when_he_reaches_it() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         let background = game.room.tile(crate::room::Kind::Background).attr;
 
         // Cell-aligned: his sixteen pixels fit in two rows exactly.
@@ -744,8 +867,39 @@ mod tests {
     }
 
     #[test]
+    fn dying_leaves_the_picture_alone_and_fades_it() {
+        // The original's death loop only writes the attribute file, so whatever
+        // was on the screen when he was hit - the room, the guardians, the
+        // items and Willy - stays there while the ink fades to black. Blitting
+        // the empty room in first wiped the guardians off instead.
+        let mut game = Game::started();
+        game.enter_room(28); // First Landing, with guardians in it.
+        for _ in 0..4 {
+            game.update(speccy::Input::default());
+            game.sounds.clear();
+        }
+        let picture: Vec<u8> = (0..4096).map(|i| game.mem.read(DISPLAY + i)).collect();
+
+        game.kill();
+        let mut inks = Vec::new();
+        while let Mode::Dying(_) = game.mode {
+            game.update(speccy::Input::default());
+            game.sounds.clear();
+            inks.push(game.mem.read(ATTR_FILE) & 7);
+            let now: Vec<u8> = (0..4096).map(|i| game.mem.read(DISPLAY + i)).collect();
+            assert_eq!(now, picture, "the death sequence redrew the screen");
+        }
+
+        assert_eq!(
+            inks,
+            vec![7, 6, 5, 4, 3, 2, 1, 0],
+            "the ink should fade out"
+        );
+    }
+
+    #[test]
     fn standing_in_a_nasty_kills_him() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         let nasty = game.room.tile(crate::room::Kind::Nasty).attr;
         game.willy = Willy {
             y: 5 * willy::ROW_UNITS,
@@ -761,7 +915,7 @@ mod tests {
         // The frame a room changes on used to leave the previous room's
         // attributes in the working buffer, and The Bathroom uses 255 for its
         // nasty, so stepping left into room 34 killed him on arrival.
-        let mut game = Game::new();
+        let mut game = Game::started();
         let go_left = speccy::Input {
             left: true,
             ..speccy::Input::default()
@@ -777,7 +931,7 @@ mod tests {
 
     #[test]
     fn dying_returns_him_to_the_door_he_came_in_by() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         let go_left = speccy::Input {
             left: true,
             ..speccy::Input::default()
@@ -818,7 +972,7 @@ mod tests {
 
     #[test]
     fn walking_into_an_item_collects_it() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         // The Watch Tower holds the first four items.
         game.goto_room(50);
         let item = (crate::item::FIRST..256)
@@ -844,7 +998,7 @@ mod tests {
 
     /// A rope room, with Willy dropped just under the rope's path.
     fn under_a_rope(number: usize) -> Game {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.goto_room(number);
         game.willy = Willy {
             y: 5 * willy::ROW_UNITS,
@@ -998,7 +1152,7 @@ mod tests {
 
     #[test]
     fn a_new_game_has_every_item_to_find() {
-        let game = Game::new();
+        let game = Game::started();
         assert_eq!(game.items.remaining(), 83);
         assert_eq!(game.items.collected, 0);
     }
@@ -1006,7 +1160,7 @@ mod tests {
     #[test]
     #[cfg(feature = "debug")]
     fn invulnerability_costs_no_lives_and_never_ends_the_game() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.debug.invulnerable = true;
         game.lives = 1;
 
@@ -1026,7 +1180,7 @@ mod tests {
 
     #[test]
     fn the_last_item_sends_maria_away() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         // Take everything but one in the Watch Tower, as walking into each
         // would. The last one has to be walked into, because the mode only
         // changes where the original changes it: in the item-drawing pass.
@@ -1056,7 +1210,7 @@ mod tests {
 
     #[test]
     fn reaching_the_bed_sends_him_running_for_the_toilet() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.goto_room(bedroom::BEDROOM);
         game.quest = Quest::AllCollected;
         // On the bed itself, at the left-hand end of the room. Row 13 is solid
@@ -1094,7 +1248,7 @@ mod tests {
 
     #[test]
     fn reaching_the_toilet_ends_the_errand() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.goto_room(bedroom::BATHROOM);
         game.quest = Quest::ToTheToilet;
         game.willy = Willy {
@@ -1123,21 +1277,77 @@ mod tests {
     }
 
     #[test]
-    fn one_in_the_morning_ends_the_night() {
+    fn a_new_game_waits_on_the_title_screen() {
         let mut game = Game::new();
+        assert!(matches!(game.mode, Mode::Title { half: 0, scroll: 0 }));
+
+        // The tune plays first, a note at a time, and nothing else moves.
+        let mut notes = 0;
+        for _ in 0..40 {
+            game.update(speccy::Input::default());
+            notes += game.sounds.drain().count();
+            assert!(matches!(game.mode, Mode::Title { scroll: 0, .. }));
+        }
+        assert!(notes > 0, "the theme tune never played");
+
+        // Enter starts the game in The Bathroom.
+        game.update(speccy::Input {
+            start: true,
+            ..speccy::Input::default()
+        });
+        game.sounds.clear();
+        assert_eq!(game.mode, Mode::Playing);
+        assert_eq!(game.room.number, START_ROOM);
+        assert_eq!(game.lives, STARTING_LIVES);
+    }
+
+    #[test]
+    fn the_message_scrolls_once_the_tune_is_over_and_then_starts_again() {
+        let mut game = Game::new();
+        // Straight to the end of the tune.
+        game.mode = Mode::Title {
+            half: crate::title::THEME_HALVES,
+            scroll: 0,
+        };
+
+        for step in 0..crate::title::SCROLL_STEPS - 1 {
+            game.update(speccy::Input::default());
+            game.sounds.clear();
+            assert_eq!(
+                game.mode,
+                Mode::Title {
+                    half: crate::title::THEME_HALVES,
+                    scroll: step + 1,
+                }
+            );
+        }
+
+        // The last step starts the whole title screen over, tune and all.
+        game.update(speccy::Input::default());
+        game.sounds.clear();
+        assert!(matches!(game.mode, Mode::Title { half: 0, scroll: 0 }));
+    }
+
+    #[test]
+    fn one_in_the_morning_ends_the_night() {
+        let mut game = Game::started();
         // A minute short of bedtime, and a frame short of the minute.
         game.clock.minutes = 18 * 60 - 1;
         game.minute = 255;
 
         game.update(speccy::Input::default());
         game.sounds.clear();
-        assert!(game.clock.past_bedtime());
-        assert!(game.quit, "the game carried on past one in the morning");
+        assert!(
+            matches!(game.mode, Mode::Title { .. }),
+            "the game carried on past one in the morning"
+        );
+        // Back to the title screen means a new night: the clock starts again.
+        assert!(!game.clock.past_bedtime());
     }
 
     #[test]
     fn maria_kills_him_in_the_bedroom() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.goto_room(bedroom::BEDROOM);
         // Maria stands at (11,14); put Willy in her.
         game.willy = Willy {
@@ -1176,7 +1386,7 @@ mod tests {
 
     #[test]
     fn losing_a_life_rubs_one_off_the_row() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.update(speccy::Input::default());
         game.sounds.clear();
         let before = lives_shown(&game);
@@ -1197,7 +1407,7 @@ mod tests {
     fn the_count_runs_all_the_way_down_before_the_game_ends() {
         // The original checks for lives remaining before taking one away, so
         // the seven it starts with are worth eight deaths.
-        let mut game = Game::new();
+        let mut game = Game::started();
         for death in 0..STARTING_LIVES {
             die(&mut game);
             assert_eq!(game.mode, Mode::Playing, "the game ended at death {death}");
@@ -1215,7 +1425,7 @@ mod tests {
 
     #[test]
     fn the_game_over_screen_is_not_drawn_over_by_the_room() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.lives = 0;
         die(&mut game);
         assert!(matches!(game.mode, Mode::GameOver(_)));
@@ -1242,15 +1452,16 @@ mod tests {
 
     #[test]
     fn the_last_life_brings_the_foot_down() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         // None left, so this death is the one that ends it.
         game.lives = 0;
         game.kill();
 
-        // Count the frames of each phase, from the accident to the picker.
+        // Count the frames of each phase, from the accident to the title screen
+        // the original goes back to.
         let (mut dying, mut foot, mut glisten) = (0, 0, 0);
         for _ in 0..300 {
-            if game.quit {
+            if matches!(game.mode, Mode::Title { .. }) {
                 break;
             }
             // Counted before the frame runs, so each total is the number of
@@ -1265,13 +1476,16 @@ mod tests {
                         .sum();
                     assert!(lit > 0, "the screen went blank");
                 }
-                Mode::Playing => panic!("he came back to life"),
+                Mode::Playing | Mode::Title { .. } => panic!("he came back to life"),
             }
             game.update(speccy::Input::default());
             game.sounds.clear();
         }
 
-        assert!(game.quit, "the game over sequence never finished");
+        assert!(
+            matches!(game.mode, Mode::Title { .. }),
+            "the game over sequence never finished"
+        );
         assert_eq!(dying, usize::from(DEATH_FRAMES) + 1, "the death sequence");
         assert_eq!(
             foot,
@@ -1287,7 +1501,7 @@ mod tests {
 
     #[test]
     fn the_tune_plays_a_note_a_frame_until_it_is_switched_off() {
-        let mut game = Game::new();
+        let mut game = Game::started();
 
         // Two frames a note. The index is incremented before it is halved, so
         // the very first frame is a note on its own and the pairs run from the
@@ -1335,12 +1549,12 @@ mod tests {
     fn the_tune_climbs_as_the_lives_run_out() {
         // The pitch byte is a delay, so fewer lives means a bigger number and a
         // lower note.
-        let mut low = Game::new();
+        let mut low = Game::started();
         low.lives = 1;
         low.update(speccy::Input::default());
         let with_one = last_pitch(&mut low);
 
-        let mut high = Game::new();
+        let mut high = Game::started();
         high.lives = 7;
         high.update(speccy::Input::default());
         let with_seven = last_pitch(&mut high);
@@ -1364,7 +1578,7 @@ mod tests {
 
     #[test]
     fn pausing_runs_the_colours_through_the_screen() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.update(speccy::Input::default());
         game.sounds.clear();
         let before: Vec<u8> = (0..768).map(|i| game.mem.read(ATTR_FILE + i)).collect();
@@ -1403,7 +1617,7 @@ mod tests {
 
     #[test]
     fn escape_asks_to_leave() {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.update(speccy::Input {
             back: true,
             ..speccy::Input::default()

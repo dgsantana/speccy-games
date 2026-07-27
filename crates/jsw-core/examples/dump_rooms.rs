@@ -27,7 +27,7 @@ fn main() {
 
     let mut frame = Frame::new();
     for number in rooms {
-        let mut game = Game::new();
+        let mut game = Game::started();
         game.goto_room(number);
         game.debug.map = map;
         game.update(Input::default());

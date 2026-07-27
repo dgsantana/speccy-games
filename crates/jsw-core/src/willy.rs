@@ -177,7 +177,18 @@ impl Willy {
     }
 
     /// Advance one frame: gravity first, then the keys.
-    pub fn update(&mut self, room: &Room, mem: &mut speccy::Memory, input: Input) -> Outcome {
+    ///
+    /// The jumping and falling sound effects are made in here because that is
+    /// where the original makes them, at 36335 and 36432: a note a frame,
+    /// pitched by how far through the jump he is or by how long he has been
+    /// falling.
+    pub fn update(
+        &mut self,
+        room: &Room,
+        mem: &mut speccy::Memory,
+        input: Input,
+        sounds: &mut speccy::sound::SoundQueue,
+    ) -> Outcome {
         // Hanging from a rope, none of gravity applies: the original jumps
         // straight from the top of 36307 to the keyboard at 36564, and the rope
         // itself moves him when it is drawn. Walking is skipped too, in
@@ -193,7 +204,7 @@ impl Willy {
         // sails through every platform until the jump runs out.
         let mut check_ground = matches!(self.jump_counter, 13 | 16) || self.airborne != 1;
         if self.airborne == 1 {
-            match self.rise_or_fall_through_jump(room, mem) {
+            match self.rise_or_fall_through_jump(room, mem, sounds) {
                 Outcome::None => {}
                 other => return other,
             }
@@ -206,7 +217,7 @@ impl Willy {
             // ground. Falling past the fatal counter is not itself fatal, which
             // matters because the counter is reached by any drop of more than
             // ten frames - including one that ends in the room below.
-            match self.settle(room, mem) {
+            match self.settle(room, mem, sounds) {
                 Outcome::None => {}
                 other => return other,
             }
@@ -217,7 +228,12 @@ impl Willy {
     }
 
     /// The jumping half of the routine at 36307.
-    fn rise_or_fall_through_jump(&mut self, room: &Room, mem: &speccy::Memory) -> Outcome {
+    fn rise_or_fall_through_jump(
+        &mut self,
+        room: &Room,
+        mem: &speccy::Memory,
+        sounds: &mut speccy::sound::SoundQueue,
+    ) -> Outcome {
         // The counter, with bit 0 discarded, less 8: -8 rising, +8 falling.
         let step = (self.jump_counter & 254).wrapping_sub(8);
         self.y = self.y.wrapping_add(step);
@@ -238,6 +254,14 @@ impl Willy {
         }
 
         self.jump_counter += 1;
+
+        // The note rises as he rises and falls as he falls, because its pitch
+        // is 8 * (1 + |J - 8|), J being the counter he has just reached. The
+        // original repeats the delay 32 times, and 32 of a delay of 8n is n of
+        // our duration units, which are 256 iterations each.
+        let from_the_top = self.jump_counter.abs_diff(8) + 1;
+        sounds.note(from_the_top.wrapping_mul(8), from_the_top);
+
         if self.jump_counter == JUMP_FRAMES {
             // The jump is over; he keeps falling unless something catches him.
             self.airborne = 6;
@@ -246,7 +270,12 @@ impl Willy {
     }
 
     /// Standing, landing or falling: the routine from 36406.
-    fn settle(&mut self, room: &Room, mem: &speccy::Memory) -> Outcome {
+    fn settle(
+        &mut self,
+        room: &Room,
+        mem: &speccy::Memory,
+        sounds: &mut speccy::sound::SoundQueue,
+    ) -> Outcome {
         // Only look for ground when his sprite is cell-aligned.
         if self.y & 14 == 0 {
             let (row, column) = self.position();
@@ -285,6 +314,17 @@ impl Willy {
         if self.airborne == 16 {
             self.airborne = 12;
         }
+
+        // The falling note deepens the longer he has been in the air: its pitch
+        // is 16 times the airborne counter, again for 32 passes of the delay,
+        // which is twice the counter in our duration units. Only a fall already
+        // under way makes it - the first frame of one is silent, because the
+        // original leaves for 36474 before reaching the sound.
+        sounds.note(
+            self.airborne.wrapping_mul(16),
+            self.airborne.wrapping_mul(2),
+        );
+
         // Four pixels down.
         self.y = self.y.wrapping_add(8);
         self.sync_cell();
@@ -515,6 +555,12 @@ mod tests {
     use speccy::Memory;
     use speccy::layout::{ATTR_BACK, PLAY_ATTRS};
 
+    /// Somewhere for the jumping and falling notes to go in the tests that are
+    /// not about them.
+    fn quiet() -> speccy::sound::SoundQueue {
+        speccy::sound::SoundQueue::default()
+    }
+
     /// A room drawn into both buffers, which is what the game loop leaves.
     fn staged(number: usize) -> (Room, Memory) {
         let room = Room::load(number);
@@ -549,7 +595,7 @@ mod tests {
 
         for _ in 0..8 {
             assert_eq!(
-                willy.update(&room, &mut mem, Input::default()),
+                willy.update(&room, &mut mem, Input::default(), &mut quiet()),
                 Outcome::None
             );
         }
@@ -576,7 +622,7 @@ mod tests {
         };
 
         for _ in 0..8 {
-            willy.update(&room, &mut mem, go_left);
+            willy.update(&room, &mut mem, go_left, &mut quiet());
         }
         assert_eq!(willy.position(), (5, 10), "he walked off along the rope");
     }
@@ -600,6 +646,7 @@ mod tests {
                 jump: true,
                 ..Input::default()
             },
+            &mut quiet(),
         );
 
         assert_eq!(willy.rope, LET_GO, "he is still holding on");
@@ -632,7 +679,7 @@ mod tests {
 
         let mut heights = vec![willy.y];
         for _ in 0..12 {
-            willy.update(&room, &mut mem, go_right);
+            willy.update(&room, &mut mem, go_right, &mut quiet());
             if *heights.last().expect("seeded") != willy.y {
                 heights.push(willy.y);
             }
@@ -709,7 +756,7 @@ mod tests {
         };
         let start = willy.position();
         for _ in 0..6 {
-            willy.update(&room, &mut mem, Input::default());
+            willy.update(&room, &mut mem, Input::default(), &mut quiet());
         }
         assert_ne!(
             willy.position(),
@@ -741,7 +788,7 @@ mod tests {
 
         let start_row = willy.position().0;
         for _ in 0..24 {
-            willy.update(&room, &mut mem, go_right);
+            willy.update(&room, &mut mem, go_right, &mut quiet());
         }
         assert!(
             willy.position().0 < start_row,
@@ -782,7 +829,7 @@ mod tests {
         };
         let start = willy.y;
         for _ in 0..3 {
-            willy.update(&room, &mut mem, Input::default());
+            willy.update(&room, &mut mem, Input::default(), &mut quiet());
         }
         assert!(
             willy.y > start,
@@ -814,7 +861,7 @@ mod tests {
                 && cell_attr(&mem, row + 2, column) == background
                 && cell_attr(&mem, row + 2, column + 1) == background;
 
-            let outcome = willy.update(&room, &mut mem, Input::default());
+            let outcome = willy.update(&room, &mut mem, Input::default(), &mut quiet());
             fell_far |= willy.airborne >= FATAL_FALL;
             match outcome {
                 Outcome::Died => {
@@ -842,7 +889,7 @@ mod tests {
             mem.write(ATTR_BUF + (7 * COLUMNS + column) as u16, floor);
         }
         assert_eq!(
-            willy.update(&room, &mut mem, Input::default()),
+            willy.update(&room, &mut mem, Input::default(), &mut quiet()),
             Outcome::Died,
             "he walked away from a fatal landing"
         );
@@ -858,7 +905,7 @@ mod tests {
             ..Willy::default()
         };
         for _ in 0..8 {
-            willy.update(&room, &mut mem, Input::default());
+            willy.update(&room, &mut mem, Input::default(), &mut quiet());
         }
         assert_eq!(willy.airborne, 0, "he should be standing");
         assert_eq!(willy.y, 13 * ROW_UNITS);
@@ -881,7 +928,7 @@ mod tests {
         // frame after the fourth animation frame.
         let start_column = willy.position().1;
         for _ in 0..5 {
-            willy.update(&room, &mut mem, go_right);
+            willy.update(&room, &mut mem, go_right, &mut quiet());
         }
         assert_eq!(willy.position().1, start_column + 1);
         assert!(!willy.facing_left());
@@ -901,7 +948,10 @@ mod tests {
             left: true,
             ..Input::default()
         };
-        assert_eq!(willy.update(&room, &mut mem, go_left), Outcome::Left);
+        assert_eq!(
+            willy.update(&room, &mut mem, go_left, &mut quiet()),
+            Outcome::Left
+        );
     }
 
     #[test]
@@ -949,9 +999,10 @@ mod tests {
                 jump: true,
                 ..Input::default()
             },
+            &mut quiet(),
         );
         for _ in 0..JUMP_FRAMES + 8 {
-            willy.update(&room, &mut mem, go_right);
+            willy.update(&room, &mut mem, go_right, &mut quiet());
         }
 
         assert_eq!(willy.airborne, 0, "he never landed");
@@ -982,7 +1033,7 @@ mod tests {
 
         let start_row = willy.position().0;
         for _ in 0..12 {
-            willy.update(&room, &mut mem, go_right);
+            willy.update(&room, &mut mem, go_right, &mut quiet());
         }
         assert!(
             willy.position().0 < start_row,
@@ -1004,14 +1055,77 @@ mod tests {
             jump: true,
             ..Input::default()
         };
-        willy.update(&room, &mut mem, jump);
+        willy.update(&room, &mut mem, jump, &mut quiet());
         assert_eq!(willy.airborne, 1);
 
         let mut highest = willy.y;
         for _ in 0..JUMP_FRAMES {
-            willy.update(&room, &mut mem, Input::default());
+            willy.update(&room, &mut mem, Input::default(), &mut quiet());
             highest = highest.min(willy.y);
         }
         assert!(highest < 13 * ROW_UNITS, "he never left the ground");
+    }
+
+    /// The pitch of every note a queue holds, in order.
+    fn pitches(sounds: &mut speccy::sound::SoundQueue) -> Vec<u8> {
+        sounds
+            .drain()
+            .filter_map(|sound| match sound {
+                speccy::sound::Sound::Note { pitch, .. } => Some(pitch),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_jump_whoops_up_and_back_down_again() {
+        let (room, mut mem) = staged(0);
+        let mut willy = Willy {
+            y: 13 * ROW_UNITS,
+            cell: ATTR_BUF + 13 * COLUMNS as u16 + 15,
+            ..Willy::default()
+        };
+        let jump = Input {
+            jump: true,
+            ..Input::default()
+        };
+        let mut sounds = speccy::sound::SoundQueue::default();
+
+        // The first frame only starts the jump; the notes come with the frames
+        // that move him.
+        willy.update(&room, &mut mem, jump, &mut sounds);
+        sounds.clear();
+        for _ in 0..3 {
+            willy.update(&room, &mut mem, Input::default(), &mut sounds);
+        }
+
+        // 8 * (1 + |J - 8|) for J = 1, 2 and 3: the note climbs with him.
+        assert_eq!(pitches(&mut sounds), vec![64, 56, 48]);
+    }
+
+    #[test]
+    fn falling_deepens_the_longer_it_goes_on() {
+        let (room, mut mem) = staged(0);
+        // Standing on nothing in the middle of the room.
+        let mut willy = Willy {
+            y: 4 * ROW_UNITS,
+            cell: ATTR_BUF + 4 * COLUMNS as u16 + 15,
+            ..Willy::default()
+        };
+        let mut sounds = speccy::sound::SoundQueue::default();
+
+        // The first frame of a fall only sets the counter, and makes no noise.
+        willy.update(&room, &mut mem, Input::default(), &mut sounds);
+        assert_eq!(willy.airborne, 2);
+        assert!(
+            pitches(&mut sounds).is_empty(),
+            "the fall started too loudly"
+        );
+
+        for _ in 0..3 {
+            willy.update(&room, &mut mem, Input::default(), &mut sounds);
+        }
+        // 16 times the airborne counter, which is 3, 4 and 5 by then.
+        assert_eq!(pitches(&mut sounds), vec![48, 64, 80]);
     }
 }

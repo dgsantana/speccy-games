@@ -9,7 +9,7 @@ fn main() {
     let room: usize = args.next().and_then(|a| a.parse().ok()).unwrap_or(33);
     let frames: usize = args.next().and_then(|a| a.parse().ok()).unwrap_or(40);
 
-    let mut game = Game::new();
+    let mut game = Game::started();
     game.goto_room(room);
     // Guardians would kill him before the movement is worth watching.
     game.debug.no_guardians = true;

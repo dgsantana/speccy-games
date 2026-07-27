@@ -17,6 +17,7 @@ pub mod item;
 pub mod map;
 pub mod room;
 pub mod rope;
+pub mod title;
 pub mod willy;
 
 pub use entity::Entities;

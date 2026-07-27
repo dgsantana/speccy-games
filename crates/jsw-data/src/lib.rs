@@ -12,6 +12,7 @@ pub mod items;
 pub mod music;
 pub mod rooms;
 pub mod sprites;
+pub mod title;
 
 /// Rooms in the mansion.
 pub const ROOM_COUNT: usize = 64;

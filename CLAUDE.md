@@ -119,6 +119,7 @@ regression in tile or attribute handling. Jet Set Willy has the same:
 
 ```bash
 cargo run -p jsw-core --example dump_rooms -- /tmp/rooms      # a PPM per room
+cargo run -p jsw-core --example dump_title -- /tmp/rooms 600  # the title screen
 cargo run -p jsw-core --example room_info -- 33               # exits, ramp, conveyor
 cargo run -p jsw-core --example entity_info -- 27             # its guardians
 cargo run -p jsw-core --features debug --example trace_walk -- 33 40  # Willy per frame
