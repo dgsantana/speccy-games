@@ -63,6 +63,14 @@ impl Items {
         self.flags[item] & 64 != 0
     }
 
+    /// Collect one without walking into it, for tests and for a debug switch.
+    pub fn take(&mut self, item: usize) {
+        if self.present(item) {
+            self.flags[item] &= 191;
+            self.collected += 1;
+        }
+    }
+
     /// Draw the items in this room and collect the one Willy is touching.
     ///
     /// `minute` is the game's minute counter, which the original mixes with the
@@ -91,8 +99,13 @@ impl Items {
             mem.write(attr, (was & 248) | ink);
 
             // Bit 3 of the screen address's high byte comes from bit 7 of the
-            // same flags byte the attribute page came from.
-            let page = 96 + ((self.flags[item] >> 3) & 8);
+            // same flags byte the attribute page came from - the original
+            // rotates the byte left four times and keeps bit 3, which brings
+            // bit 7 down to it. Shifting right by three instead reads bit 6,
+            // which is the collection flag and set for everything still out
+            // there, so every item in the top half of the screen was drawn
+            // eight rows below the cell it was coloured in.
+            let page = 96 + ((self.flags[item] >> 4) & 8);
             let mut at = addr_of(page, self.places[item]);
             for &byte in graphic {
                 mem.write(at, byte);
@@ -156,7 +169,11 @@ mod tests {
         let room = Room::load(50);
         let mut mem = Memory::new();
         room.draw(&mut mem);
-        mem.copy(speccy::layout::ATTR_BACK, ATTR_BUF, speccy::layout::PLAY_ATTRS);
+        mem.copy(
+            speccy::layout::ATTR_BACK,
+            ATTR_BUF,
+            speccy::layout::PLAY_ATTRS,
+        );
 
         let before: u32 = (0..4096)
             .map(|i| mem.read(speccy::layout::SCREEN_BUF + i).count_ones())
@@ -171,12 +188,76 @@ mod tests {
     }
 
     #[test]
+    fn an_item_is_drawn_in_the_cell_it_is_coloured_in() {
+        // The Chapel's one item sits at (6,29), in the top half of the screen.
+        // Its pixels and its attribute have to agree about where it is: they
+        // come from different bits of the same byte, and reading the wrong bit
+        // for the pixels drew every top-half item eight rows further down,
+        // where the room usually swallowed it.
+        for number in 0..jsw_data::ROOM_COUNT {
+            let mut items = Items::new();
+            let room = Room::load(number);
+            if !room.is_real() {
+                continue;
+            }
+            if !(FIRST..256).any(|item| items.room_of(item) == number) {
+                continue;
+            }
+            // First Landing's item graphic is eight zero bytes in the game's own
+            // data, which is why the item at (3,26) there cannot be seen. It is
+            // the only room with an item it cannot draw, and that is the
+            // original's bug, kept.
+            if room.item.iter().all(|&byte| byte == 0) {
+                assert_eq!(number, 28, "another room cannot draw its items");
+                continue;
+            }
+
+            let mut mem = Memory::new();
+            room.draw(&mut mem);
+            mem.copy(
+                speccy::layout::ATTR_BACK,
+                ATTR_BUF,
+                speccy::layout::PLAY_ATTRS,
+            );
+            mem.fill(speccy::layout::SCREEN_BUF, speccy::layout::PLAY_PIXELS, 0);
+            items.draw(number, 0, &room.item, &mut mem);
+
+            for item in FIRST..256 {
+                if items.room_of(item) != number || !items.present(item) {
+                    continue;
+                }
+                let offset = items.cell_of(item) - ATTR_BUF;
+                let (row, column) = (offset as usize / 32, offset as usize % 32);
+
+                // The item's own eight pixel rows, in its own cell.
+                let drawn: u32 = (0..8)
+                    .map(|line| {
+                        let at = speccy::layout::SCREEN_BUF
+                            + speccy::layout::cell_offset(row, line, column) as u16;
+                        mem.read(at).count_ones()
+                    })
+                    .sum();
+                assert!(
+                    drawn > 0,
+                    "item {item} of room {number} ({}) is coloured at ({row},{column}) \
+                     but drawn somewhere else",
+                    room.title
+                );
+            }
+        }
+    }
+
+    #[test]
     fn white_ink_under_an_item_collects_it() {
         let mut items = Items::new();
         let room = Room::load(50);
         let mut mem = Memory::new();
         room.draw(&mut mem);
-        mem.copy(speccy::layout::ATTR_BACK, ATTR_BUF, speccy::layout::PLAY_ATTRS);
+        mem.copy(
+            speccy::layout::ATTR_BACK,
+            ATTR_BUF,
+            speccy::layout::PLAY_ATTRS,
+        );
 
         // Willy's drawing would have forced white ink here.
         let item = (FIRST..256).find(|&n| items.room_of(n) == 50).expect("one");
