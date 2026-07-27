@@ -6,7 +6,7 @@
 //! unlike each other.
 
 use speccy::layout::{ATTR_BACK, ATTR_BUF, COLUMNS, ROWS, SCREEN_BACK, cell_offset};
-use speccy::memory::{Memory, lsb, msb};
+use speccy::memory::{Memory, add_lsb, lsb, msb};
 
 /// Cells across the playing area.
 pub const CELLS: usize = ROWS * COLUMNS;
@@ -170,9 +170,7 @@ impl Room {
     /// than rooms, so their "names" are not text. The game never takes Willy
     /// there; only a debug jump can reach them.
     pub fn is_real(&self) -> bool {
-        self.name
-            .iter()
-            .all(|&b| b == 32 || (33..127).contains(&b))
+        self.name.iter().all(|&b| b == 32 || (33..127).contains(&b))
     }
 
     /// What is at a cell, taking the ramp and conveyor into account.
@@ -199,6 +197,48 @@ impl Room {
             let column = column + step;
             (column < COLUMNS).then_some((row, column))
         })
+    }
+
+    /// Wind the conveyor on one frame: the routine at 39707.
+    ///
+    /// Only two of the eight pixel rows of the conveyor tile move - the first
+    /// and the third - and they move in opposite directions, two pixels each, so
+    /// the belt appears to run one way along the top and back along the bottom.
+    /// The two rows are read from the leftmost tile and then written to every
+    /// tile of the run, which is why a conveyor is always in step with itself.
+    ///
+    /// It works on the empty-room buffer rather than the working one, so the
+    /// belt keeps turning without being redrawn every frame.
+    pub fn move_conveyor(&self, mem: &mut speccy::Memory) {
+        if self.conveyor.length == 0 {
+            return;
+        }
+        let Some((row, column)) = self.conveyor.start() else {
+            return;
+        };
+
+        let top = SCREEN_BACK + cell_offset(row, 0, column) as u16;
+        let bottom = SCREEN_BACK + cell_offset(row, 2, column) as u16;
+        let rightwards = self.conveyor.direction != 0;
+        let (top_row, bottom_row) = if rightwards {
+            (
+                mem.read(top).rotate_right(2),
+                mem.read(bottom).rotate_left(2),
+            )
+        } else {
+            (
+                mem.read(top).rotate_left(2),
+                mem.read(bottom).rotate_right(2),
+            )
+        };
+
+        // The original walks the run with INC L, so a conveyor that reaches the
+        // right-hand edge carries on at the left of the same pixel row rather
+        // than moving down a row.
+        for step in 0..self.conveyor.length {
+            mem.write(add_lsb(top, step), top_row);
+            mem.write(add_lsb(bottom, step), bottom_row);
+        }
     }
 
     /// The cells the ramp climbs through, from its foot.
@@ -249,7 +289,13 @@ impl Room {
 /// because three of the 64 rooms hold code rather than a room.
 fn title_of(name: &[u8; 32]) -> String {
     name.iter()
-        .map(|&b| if (32..127).contains(&b) { b as char } else { '?' })
+        .map(|&b| {
+            if (32..127).contains(&b) {
+                b as char
+            } else {
+                '?'
+            }
+        })
         .collect::<String>()
         .trim()
         .to_owned()
@@ -321,6 +367,71 @@ mod tests {
         assert_eq!(room.exits.right, 0);
         assert_eq!(room.exits.up, 0);
         assert_eq!(room.exits.down, 0);
+    }
+
+    #[test]
+    fn a_conveyor_belt_turns_two_pixels_a_frame_each_way() {
+        // The Off Licence's belt moves left, so the top pixel row of the tile
+        // shifts left and the third row shifts right.
+        let room = Room::load(0);
+        assert_eq!(room.conveyor.direction, 0);
+        let (row, column) = room.conveyor.start().expect("it has a conveyor");
+
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+        let top = SCREEN_BACK + cell_offset(row, 0, column) as u16;
+        let bottom = SCREEN_BACK + cell_offset(row, 2, column) as u16;
+        let (was_top, was_bottom) = (mem.read(top), mem.read(bottom));
+
+        room.move_conveyor(&mut mem);
+        assert_eq!(mem.read(top), was_top.rotate_left(2));
+        assert_eq!(mem.read(bottom), was_bottom.rotate_right(2));
+
+        // Every tile of the run is left holding the same two rows.
+        for step in 0..room.conveyor.length {
+            assert_eq!(mem.read(add_lsb(top, step)), was_top.rotate_left(2));
+            assert_eq!(mem.read(add_lsb(bottom, step)), was_bottom.rotate_right(2));
+        }
+
+        // Four frames of two pixels bring it back where it started.
+        for _ in 0..3 {
+            room.move_conveyor(&mut mem);
+        }
+        assert_eq!(mem.read(top), was_top, "the belt did not come full circle");
+    }
+
+    #[test]
+    fn the_other_pixel_rows_of_a_conveyor_stay_where_they_are() {
+        let room = Room::load(0);
+        let (row, column) = room.conveyor.start().expect("it has a conveyor");
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+
+        let still: Vec<u8> = [1, 3, 4, 5, 6, 7]
+            .iter()
+            .map(|&pixel_row| mem.read(SCREEN_BACK + cell_offset(row, pixel_row, column) as u16))
+            .collect();
+        room.move_conveyor(&mut mem);
+        for (n, &pixel_row) in [1, 3, 4, 5, 6, 7].iter().enumerate() {
+            assert_eq!(
+                mem.read(SCREEN_BACK + cell_offset(row, pixel_row, column) as u16),
+                still[n],
+                "pixel row {pixel_row} moved"
+            );
+        }
+    }
+
+    #[test]
+    fn a_room_without_a_conveyor_is_left_alone() {
+        // Under the MegaTree has no belt.
+        let room = Room::load(2);
+        assert_eq!(room.conveyor.length, 0);
+        let mut mem = Memory::new();
+        room.draw(&mut mem);
+        let before: Vec<u8> = (0..4096).map(|i| mem.read(SCREEN_BACK + i)).collect();
+        room.move_conveyor(&mut mem);
+        let after: Vec<u8> = (0..4096).map(|i| mem.read(SCREEN_BACK + i)).collect();
+        assert_eq!(before, after);
     }
 
     #[test]
