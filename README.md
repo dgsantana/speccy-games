@@ -7,8 +7,13 @@ them.
 Matthew Smith's *Manic Miner* (1983) is the one that is finished: all twenty
 caverns, the original tiles and sprites, the real attribute colours, and a
 square-wave beeper playing The Blue Danube on the title screen and In the Hall
-of the Mountain King underground. Jet Set Willy I to III and Match Point are
-listed on the picker and are not written yet.
+of the Mountain King underground.
+
+*Jet Set Willy* (1984) is playable too: sixty-odd rooms of the mansion, the
+guardians, arrows and swinging ropes, all eighty-three items, Maria on guard in
+Master Bedroom, and the night ending at one in the morning whether or not Willy
+has been allowed to bed. Jet Set Willy II and III and Match Point are listed on
+the picker and are not written yet.
 
 Everything renders into a virtual Spectrum display file, the start screen
 included, so what you see is what the 1983 machine drew.

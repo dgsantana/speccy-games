@@ -1,10 +1,10 @@
 # Working on manic-miner-rs
 
 Faithful Rust ports of ZX Spectrum games, rendered with macroquad, behind a
-start screen that picks between them. Matthew Smith's *Manic Miner* (1983) is
-the one that is written; Jet Set Willy I to III and Match Point are listed on
-the picker and are not. This file is the orientation guide for anyone — human or
-agent — picking the project up.
+start screen that picks between them. Matthew Smith's *Manic Miner* (1983) and
+*Jet Set Willy* (1984) are the two that are written; Jet Set Willy II and III
+and Match Point are listed on the picker and are not. This file is the
+orientation guide for anyone — human or agent — picking the project up.
 
 ## Layout
 
@@ -122,6 +122,7 @@ cargo run -p jsw-core --example dump_rooms -- /tmp/rooms      # a PPM per room
 cargo run -p jsw-core --example room_info -- 33               # exits, ramp, conveyor
 cargo run -p jsw-core --example entity_info -- 27             # its guardians
 cargo run -p jsw-core --features debug --example trace_walk -- 33 40  # Willy per frame
+cargo run -p jsw-core --features debug --example trace_rope -- 18 12  # a rope's swing
 cargo run -p jsw-core --example map -- docs/jsw-mansion.svg   # the whole house
 ```
 
