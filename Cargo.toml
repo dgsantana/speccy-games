@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/jsw-core",
     "crates/jsw-data",
+    "crates/jsw2-data",
     "crates/mm-core",
     "crates/mm-data",
     "crates/speccy",
@@ -19,6 +20,7 @@ repository = "https://github.com/dgsantana/speccy-games"
 [workspace.dependencies]
 jsw-core = { path = "crates/jsw-core" }
 jsw-data = { path = "crates/jsw-data" }
+jsw2-data = { path = "crates/jsw2-data" }
 mm-core = { path = "crates/mm-core" }
 mm-data = { path = "crates/mm-data" }
 speccy = { path = "crates/speccy" }

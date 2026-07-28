@@ -1,0 +1,12 @@
+[package]
+name = "jsw2-data"
+description = "Jet Set Willy II byte tables, lifted from the game's own memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
