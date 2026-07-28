@@ -166,6 +166,62 @@ impl Room {
         }
     }
 
+    /// Decode Jet Set Willy II's room `number`.
+    ///
+    /// The room comes out as the same `Room` Jet Set Willy's does, so
+    /// everything downstream - drawing, walking, the conveyor, the map - is
+    /// shared. Only the reading differs, and that is in [`jsw2`].
+    ///
+    /// The nine cell types map onto the six kinds the engine knows: air is
+    /// background, water is floor, earth is wall, fire is nasty, both ramps are
+    /// ramp and both conveyors are conveyor. An item cell is background with an
+    /// item standing in it.
+    #[must_use]
+    pub fn load_jsw2(number: usize) -> Self {
+        let read = jsw2::entry(number);
+
+        let mut layout = [0u8; CELLS];
+        for (cell, &kind) in layout.iter_mut().zip(read.cells.iter()) {
+            *cell = match kind {
+                1 => 1,
+                2 => 2,
+                3 => 3,
+                _ => 0,
+            };
+        }
+
+        // The eight slots are indexed by cell type, and the engine's six kinds
+        // are the first six of them. The right-hand conveyor and the back ramp
+        // are the seventh and eighth, and share the graphics of the other two.
+        let tiles = [
+            jsw2::cell_graphic(read.patterns[0]),
+            jsw2::cell_graphic(read.patterns[1]),
+            jsw2::cell_graphic(read.patterns[2]),
+            jsw2::cell_graphic(read.patterns[3]),
+            jsw2::cell_graphic(read.patterns[4]),
+            jsw2::cell_graphic(read.patterns[5]),
+        ];
+
+        let mut name = [32u8; 32];
+        for (slot, byte) in name.iter_mut().zip(read.name.bytes()) {
+            *slot = byte;
+        }
+
+        Self {
+            number,
+            title: read.name.clone(),
+            name,
+            layout,
+            tiles,
+            conveyor: run_of(&read.cells, [5, 8]),
+            ramp: run_of(&read.cells, [4, 7]),
+            border: read.border,
+            item: jsw2::cell_graphic(read.patterns[6]).pixels,
+            exits: read.exits,
+            entities: [EntitySlot::default(); 8],
+        }
+    }
+
     /// Whether this is a room at all.
     ///
     /// Three of the sixty-four 256-byte blocks hold code and leftovers rather
@@ -289,6 +345,31 @@ impl Room {
 
 /// A room name with the padding taken off. Non-text bytes come back as `?`,
 /// because three of the 64 rooms hold code rather than a room.
+/// The first run of cells of one of `kinds`, as a [`Run`].
+///
+/// Jet Set Willy names its conveyor and its ramp in the room definition; Jet
+/// Set Willy II draws them as cell types instead, so the run has to be found in
+/// the shape. A room has at most one of each, and the cell type decides which
+/// way it goes: the left-hand conveyor and the ramp that climbs to the left are
+/// the lower of the two numbers.
+fn run_of(cells: &[u8; CELLS], kinds: [u8; 2]) -> Run {
+    let Some(start) = cells.iter().position(|cell| kinds.contains(cell)) else {
+        return Run::default();
+    };
+    let kind = cells[start];
+    let length = cells[start..]
+        .iter()
+        .take_while(|&&cell| cell == kind)
+        .count()
+        .min(COLUMNS);
+
+    Run {
+        direction: u8::from(kind == kinds[1]),
+        addr: ATTR_BACK + start as u16,
+        length: length as u8,
+    }
+}
+
 fn title_of(name: &[u8; 32]) -> String {
     name.iter()
         .map(|&b| {
@@ -508,5 +589,33 @@ mod tests {
                 "room {number} wrote past its buffer"
             );
         }
+    }
+
+    #[test]
+    fn every_jsw2_room_loads_and_draws_inside_the_buffers() {
+        for number in 0..jsw2_data::ROOM_COUNT {
+            let room = Room::load_jsw2(number);
+            assert_eq!(room.number, number);
+
+            let mut mem = Memory::new();
+            room.draw(&mut mem);
+            assert_eq!(mem.read(SCREEN_BACK - 1), 0, "room {number} wrote too low");
+            assert_eq!(
+                mem.read(SCREEN_BACK + 4096),
+                0,
+                "room {number} wrote past its buffer"
+            );
+        }
+    }
+
+    #[test]
+    fn the_first_jsw2_room_is_the_off_licence_with_a_floor() {
+        let room = Room::load_jsw2(0);
+        assert_eq!(room.title, "The Off Licence");
+        // Willy has to be able to stand on the bottom row.
+        assert!(
+            (0..COLUMNS).any(|column| room.kind_at(15, column) == Kind::Floor),
+            "nothing to stand on in room 0"
+        );
     }
 }
