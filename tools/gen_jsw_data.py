@@ -20,10 +20,12 @@ it can be checked against the disassembly line by line.
 
 import os
 import re
-import struct
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from jsw_snapshot import load_z80
 
 SKOOL = os.environ.get("JSW_SKOOL", "/tmp/jsw/sources/jsw.skool")
 OUT = sys.argv[1] if len(sys.argv) > 1 else "crates/jsw-data/src"
@@ -118,41 +120,9 @@ def load_image(path):
     return memory
 
 
-def load_snapshot(path):
-    """Decode a .z80 snapshot into a 64K image, for checking the generator.
-
-    Only version 1 is handled, which is what the common dumps of this game are:
-    a 30-byte header then the 48K of RAM, optionally run-length compressed.
-    """
-    data = open(path, "rb").read()
-    if struct.unpack("<H", data[6:8])[0] == 0:
-        sys.exit(f"{path} is a version 2 or 3 snapshot, which this does not read")
-
-    body = data[30:]
-    compressed = (data[12] >> 5) & 1
-    if compressed:
-        if body[-4:] == b"\x00\xed\xed\x00":
-            body = body[:-4]
-        ram = bytearray()
-        index = 0
-        while index < len(body):
-            if body[index] == 0xED and index + 1 < len(body) and body[index + 1] == 0xED:
-                ram += bytes([body[index + 3]]) * body[index + 2]
-                index += 4
-            else:
-                ram.append(body[index])
-                index += 1
-    else:
-        ram = bytearray(body)
-
-    memory = bytearray(65536)
-    memory[16384:16384 + len(ram)] = ram[:49152]
-    return memory
-
-
 def verify(memory, snapshot_path):
     """Check the disassembly's image against a real snapshot of the game."""
-    snapshot = load_snapshot(snapshot_path)
+    snapshot = load_z80(snapshot_path)
     # The item table's collection flag is live state: a snapshot taken after the
     # game has started has it set the other way for each of the 83 items. Only
     # that bit may differ, so it is masked out rather than ignored.
