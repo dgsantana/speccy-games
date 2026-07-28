@@ -20,14 +20,23 @@ use jsw_core::Room;
 use jsw_core::map::Place;
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "mansion.svg".into());
+    let jsw2 = std::env::args().any(|a| a == "--jsw2");
+    let path = std::env::args()
+        .skip(1)
+        .find(|a| !a.starts_with("--"))
+        .unwrap_or_else(|| "mansion.svg".into());
 
-    let rooms: Vec<Room> = (0..jsw_core::ROOM_COUNT)
-        .map(Room::load)
+    let variant = if jsw2 {
+        jsw_core::Variant::Jsw2
+    } else {
+        jsw_core::Variant::Jsw1
+    };
+    let rooms: Vec<Room> = (0..jsw_core::map::room_count(variant))
+        .map(|number| jsw_core::map::room(variant, number))
         .filter(Room::is_real)
         .collect();
 
-    let layout = jsw_core::map::layout();
+    let layout = jsw_core::map::layout_of(variant);
     print_grid(&rooms, &layout.places);
 
     let named = |n: usize| {
@@ -45,7 +54,7 @@ fn main() {
         }
     }
 
-    let svg = draw_svg(&rooms, &layout.places);
+    let svg = draw_svg(variant, &rooms, &layout.places);
     std::fs::write(&path, svg).expect("could not write the map");
     println!("\nwrote {path}");
 }
@@ -102,7 +111,7 @@ const CELL_W: i32 = 132;
 const CELL_H: i32 = 74;
 const PAD: i32 = 10;
 
-fn draw_svg(rooms: &[Room], places: &HashMap<usize, Place>) -> String {
+fn draw_svg(variant: jsw_core::Variant, rooms: &[Room], places: &HashMap<usize, Place>) -> String {
     let by_number: HashMap<usize, &Room> = rooms.iter().map(|r| (r.number, r)).collect();
     let (min_x, max_x, min_y, max_y) = bounds(places);
     let width = (max_x - min_x + 1) * CELL_W + 2 * PAD;
@@ -113,6 +122,11 @@ fn draw_svg(rooms: &[Room], places: &HashMap<usize, Place>) -> String {
             PAD + (place.0 - min_x) * CELL_W,
             PAD + 30 + (place.1 - min_y) * CELL_H,
         )
+    };
+
+    let title = match variant {
+        jsw_core::Variant::Jsw1 => "Jet Set Willy",
+        jsw_core::Variant::Jsw2 => "Jet Set Willy II",
     };
 
     let mut svg = String::new();
@@ -129,7 +143,7 @@ viewBox="0 0 {width} {height}" font-family="monospace">
   text {{ dominant-baseline: hanging; }}
 </style>
 <rect width="{width}" height="{height}" fill="#08080c"/>
-<text x="{PAD}" y="{PAD}" fill="#b0b0d0" font-size="14px">Jet Set Willy: the mansion,
+<text x="{PAD}" y="{PAD}" fill="#b0b0d0" font-size="14px">{title}: the mansion,
 laid out by the rooms' own exits</text>
 "##
     );
@@ -146,7 +160,7 @@ laid out by the rooms' own exits</text>
             (room.exits.down, (0, 1)),
         ] {
             let dest = usize::from(dest);
-            if !jsw_core::map::leads_somewhere(room.number, dest)
+            if !jsw_core::map::leads_somewhere(variant, room.number, dest)
                 || !by_number.contains_key(&dest)
             {
                 continue;

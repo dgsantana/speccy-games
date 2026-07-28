@@ -64,7 +64,7 @@ pub enum Variant {
 impl Variant {
     /// The room Willy starts the night in. Both games start him in a bathroom;
     /// they disagree about which number that is.
-    fn start_room(self) -> usize {
+    pub(crate) fn start_room(self) -> usize {
         match self {
             Self::Jsw1 => START_ROOM,
             Self::Jsw2 => JSW2_START_ROOM,
@@ -72,7 +72,7 @@ impl Variant {
     }
 
     /// How many rooms this game has.
-    fn room_count(self) -> usize {
+    pub(crate) fn room_count(self) -> usize {
         match self {
             Self::Jsw1 => jsw_data::ROOM_COUNT,
             Self::Jsw2 => jsw2_data::ROOM_COUNT,
@@ -80,7 +80,7 @@ impl Variant {
     }
 
     /// Load one of them.
-    fn room(self, number: usize) -> Room {
+    pub(crate) fn room(self, number: usize) -> Room {
         match self {
             Self::Jsw1 => Room::load(number),
             Self::Jsw2 => Room::load_jsw2(number),
@@ -729,7 +729,7 @@ impl Game {
             let number = self.room.number;
             // Lent out and given back, rather than copied every frame.
             let visited = std::mem::take(&mut self.visited);
-            crate::map::draw(&mut self.mem, number, &visited, &name);
+            crate::map::draw(&mut self.mem, self.variant, number, &visited, &name);
             self.visited = visited;
         }
     }
@@ -801,7 +801,7 @@ impl Game {
     /// Not a cheat in itself — the room dumper uses it too — so it is always
     /// available. What the `debug` feature adds is a key bound to it.
     pub fn goto_room(&mut self, number: usize) {
-        self.enter_room(number % jsw_data::ROOM_COUNT);
+        self.enter_room(number % self.variant.room_count());
         self.willy = Willy::default();
     }
 
@@ -1715,6 +1715,31 @@ mod tests {
             game.sounds.clear();
         }
         assert_ne!(game.willy.position(), before, "he never moved");
+    }
+
+    #[test]
+    #[cfg(feature = "debug")]
+    fn a_door_in_the_second_mansion_leads_to_the_room_it_names() {
+        let mut game = Game::new_jsw2();
+        game.mode = Mode::Playing;
+        // The Off Licence has a clear floor westward and its left-hand exit is
+        // the Garden, so walking left leaves by the door.
+        game.goto_room(0);
+        assert_eq!(game.room.title, "The Off Licence");
+        assert_eq!(game.room.exits.left, 69);
+
+        for _ in 0..200 {
+            game.update(speccy::Input {
+                left: true,
+                ..speccy::Input::default()
+            });
+            game.sounds.clear();
+            if game.room.number != 0 {
+                break;
+            }
+        }
+        assert_eq!(game.room.number, 69, "he never walked out of The Off Licence");
+        assert_eq!(game.room.title, "Garden");
     }
 
     #[test]

@@ -7,14 +7,24 @@ fn main() {
         .skip(1)
         .filter_map(|a| a.parse().ok())
         .collect();
+    let jsw2 = std::env::args().any(|a| a == "--jsw2");
     let rooms = if rooms.is_empty() {
-        (0..jsw_core::ROOM_COUNT).collect()
+        let count = if jsw2 {
+            jsw2_data::ROOM_COUNT
+        } else {
+            jsw_core::ROOM_COUNT
+        };
+        (0..count).collect()
     } else {
         rooms
     };
 
     for number in rooms {
-        let room = Room::load(number);
+        let room = if jsw2 {
+            Room::load_jsw2(number)
+        } else {
+            Room::load(number)
+        };
         println!(
             "{number:2} {:32} exits l={} r={} u={} d={}",
             room.title, room.exits.left, room.exits.right, room.exits.up, room.exits.down

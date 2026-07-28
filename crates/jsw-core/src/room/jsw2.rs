@@ -186,13 +186,16 @@ pub fn entry(number: usize) -> Entry {
     }
 
     // The exits follow the name, in the order left, up, right, down - not the
-    // order Jet Set Willy stores them in.
+    // order Jet Set Willy stores them in. They count from one rather than from
+    // zero, and a room names itself in a direction it has no exit in, which is
+    // what the engine already takes "no room that way" to mean.
     let mut after = name_end(number);
+    let door = |offset: u16| jsw2_data::read(after.wrapping_add(offset)).saturating_sub(1);
     let exits = Exits {
-        left: jsw2_data::read(after),
-        up: jsw2_data::read(after.wrapping_add(1)),
-        right: jsw2_data::read(after.wrapping_add(2)),
-        down: jsw2_data::read(after.wrapping_add(3)),
+        left: door(0),
+        up: door(1),
+        right: door(2),
+        down: door(3),
     };
     after = after.wrapping_add(4);
 
@@ -318,10 +321,10 @@ mod tests {
         for number in 0..jsw2_data::ROOM_COUNT {
             let room = entry(number);
             assert!(
-                (room.exits.left as usize) <= jsw2_data::ROOM_COUNT
-                    && (room.exits.right as usize) <= jsw2_data::ROOM_COUNT
-                    && (room.exits.up as usize) <= jsw2_data::ROOM_COUNT
-                    && (room.exits.down as usize) <= jsw2_data::ROOM_COUNT,
+                (room.exits.left as usize) < jsw2_data::ROOM_COUNT
+                    && (room.exits.right as usize) < jsw2_data::ROOM_COUNT
+                    && (room.exits.up as usize) < jsw2_data::ROOM_COUNT
+                    && (room.exits.down as usize) < jsw2_data::ROOM_COUNT,
                 "room {number} ({}) leads somewhere that is not a room: {:?}",
                 room.name,
                 room.exits

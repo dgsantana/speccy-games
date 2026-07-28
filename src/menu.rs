@@ -32,8 +32,8 @@ pub const CATALOGUE: &[Entry] = &[
     },
     Entry {
         title: "JET SET WILLY II",
-        year: "SOON",
-        launch: None,
+        year: "1985",
+        launch: Some(|| Box::new(jsw_core::Game::new_jsw2())),
     },
     Entry {
         title: "MATCH POINT",

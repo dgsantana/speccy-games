@@ -190,16 +190,18 @@ impl Room {
             };
         }
 
-        // The eight slots are indexed by cell type, and the engine's six kinds
-        // are the first six of them. The right-hand conveyor and the back ramp
-        // are the seventh and eighth, and share the graphics of the other two.
+        // The eight slots start at water, not at air: air has no graphic at all
+        // and is left black, which is why a room's background is the paper the
+        // Spectrum starts with. So the slots run one behind the cell types, and
+        // the last two - the back ramp and the right-hand conveyor - name the
+        // same graphics as the forward ramp and the left-hand conveyor do.
         let tiles = [
+            Tile::default(),
             jsw2::cell_graphic(read.patterns[0]),
             jsw2::cell_graphic(read.patterns[1]),
             jsw2::cell_graphic(read.patterns[2]),
             jsw2::cell_graphic(read.patterns[3]),
             jsw2::cell_graphic(read.patterns[4]),
-            jsw2::cell_graphic(read.patterns[5]),
         ];
 
         let mut name = [32u8; 32];
@@ -213,10 +215,10 @@ impl Room {
             name,
             layout,
             tiles,
-            conveyor: run_of(&read.cells, [5, 8]),
-            ramp: run_of(&read.cells, [4, 7]),
+            conveyor: conveyor_of(&read.cells),
+            ramp: ramp_of(&read.cells),
             border: read.border,
-            item: jsw2::cell_graphic(read.patterns[6]).pixels,
+            item: jsw2::cell_graphic(read.patterns[5]).pixels,
             exits: read.exits,
             entities: [EntitySlot::default(); 8],
         }
@@ -345,15 +347,13 @@ impl Room {
 
 /// A room name with the padding taken off. Non-text bytes come back as `?`,
 /// because three of the 64 rooms hold code rather than a room.
-/// The first run of cells of one of `kinds`, as a [`Run`].
+/// The conveyor a Jet Set Willy II room draws as cell types, as a [`Run`].
 ///
-/// Jet Set Willy names its conveyor and its ramp in the room definition; Jet
-/// Set Willy II draws them as cell types instead, so the run has to be found in
-/// the shape. A room has at most one of each, and the cell type decides which
-/// way it goes: the left-hand conveyor and the ramp that climbs to the left are
-/// the lower of the two numbers.
-fn run_of(cells: &[u8; CELLS], kinds: [u8; 2]) -> Run {
-    let Some(start) = cells.iter().position(|cell| kinds.contains(cell)) else {
+/// Jet Set Willy names its conveyor in the room definition; Jet Set Willy II
+/// paints it into the shape instead, so the run has to be found. A conveyor
+/// lies along a row, and its cell type says which way it moves.
+fn conveyor_of(cells: &[u8; CELLS]) -> Run {
+    let Some(start) = cells.iter().position(|&cell| cell == 5 || cell == 8) else {
         return Run::default();
     };
     let kind = cells[start];
@@ -361,12 +361,57 @@ fn run_of(cells: &[u8; CELLS], kinds: [u8; 2]) -> Run {
         .iter()
         .take_while(|&&cell| cell == kind)
         .count()
-        .min(COLUMNS);
+        .min(COLUMNS - start % COLUMNS);
 
     Run {
-        direction: u8::from(kind == kinds[1]),
+        direction: u8::from(kind == 8),
         addr: ATTR_BACK + start as u16,
         length: length as u8,
+    }
+}
+
+/// The ramp, the same way - but a ramp climbs a cell at a time, so its cells
+/// are a diagonal rather than a row and counting along the shape would always
+/// find a run of one.
+///
+/// [`Run`] names a ramp by its foot, which is its lowest cell, and the engine
+/// walks upwards from there. Which way it leans is decided by looking at the
+/// cell one row up: the game's two ramp types are drawn the same way round in
+/// every room, but reading the shape costs nothing and cannot be wrong.
+fn ramp_of(cells: &[u8; CELLS]) -> Run {
+    let is_ramp = |row: usize, column: usize| {
+        row < ROWS && column < COLUMNS && matches!(cells[row * COLUMNS + column], 4 | 7)
+    };
+    let Some(foot) = (0..CELLS).rev().find(|&cell| matches!(cells[cell], 4 | 7)) else {
+        return Run::default();
+    };
+    let (row, column) = (foot / COLUMNS, foot % COLUMNS);
+
+    // One cell up and one along, whichever way the next cell of the ramp is.
+    let rightwards = column + 1 < COLUMNS && is_ramp(row.wrapping_sub(1), column + 1);
+    let mut length = 1u8;
+    let mut at = (row, column);
+    while length < ROWS as u8 {
+        let Some(up) = at.0.checked_sub(1) else { break };
+        let along = if rightwards {
+            at.1 + 1
+        } else {
+            match at.1.checked_sub(1) {
+                Some(column) => column,
+                None => break,
+            }
+        };
+        if !is_ramp(up, along) {
+            break;
+        }
+        at = (up, along);
+        length += 1;
+    }
+
+    Run {
+        direction: u8::from(rightwards),
+        addr: ATTR_BACK + foot as u16,
+        length,
     }
 }
 

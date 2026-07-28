@@ -13,8 +13,13 @@ of the Mountain King underground.
 and the impossible triangle, sixty-odd rooms of the mansion, the guardians,
 arrows and swinging ropes, all eighty-three items, Maria on guard in Master
 Bedroom, and the night ending at one in the morning whether or not Willy has
-been allowed to bed. Jet Set Willy II and Match Point are listed on
-the picker and are not written yet.
+been allowed to bed.
+
+*Jet Set Willy II* (1985) is on the picker too, as far as its mansion goes: all
+134 rooms, drawn from the game's own compressed room data, with Willy walking
+them and the doors between them working. Its guardians, items and the rest of
+what makes it a game are not written yet. Match Point is listed and is not
+written at all.
 
 Everything renders into a virtual Spectrum display file, the start screen
 included, so what you see is what the 1983 machine drew.

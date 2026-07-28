@@ -14,6 +14,9 @@ manic-miner-rs        bin    window, input, the picker, the app state machine
   crates/speccy-audio lib    cpal beeper synth
   crates/mm-core      lib    Manic Miner: caverns, Willy, guardians, game loop
     crates/mm-data    lib    Manic Miner byte tables, no dependencies
+  crates/jsw-core     lib    Jet Set Willy and Jet Set Willy II, by Variant
+    crates/jsw-data   lib    Jet Set Willy byte tables
+    crates/jsw2-data  lib    Jet Set Willy II's memory, lifted from a snapshot
 tools/gen_data.py            regenerates mm-data from the reference C arrays
 ```
 
@@ -84,6 +87,19 @@ dump as well. Everything matches byte for byte except the item table's
 collection flag, which is live state rather than data. Snapshots stay out of the
 repository; `z80/` is ignored.
 
+Jet Set Willy II has no published disassembly, so its data comes out of a
+snapshot instead. The generator emits the top half of the game's address space
+and the addresses that lead into it, and the engine walks that as the original
+does — the rooms are compressed, so nothing is decoded until Rust decodes it.
+
+```bash
+JSW2_SNAPSHOT=z80/<a Jet Set Willy II .z80> python3 tools/gen_jsw2_data.py crates/jsw2-data/src
+```
+
+The room format is documented at <https://www.seasip.info/Jsw/jsw2room.html>.
+Both generators share `tools/jsw_snapshot.py`; `python3 tools/test_jsw_snapshot.py`
+checks it still reads the snapshots.
+
 ## Checking your work
 
 ```bash
@@ -125,6 +141,14 @@ cargo run -p jsw-core --example entity_info -- 27             # its guardians
 cargo run -p jsw-core --features debug --example trace_walk -- 33 40  # Willy per frame
 cargo run -p jsw-core --features debug --example trace_rope -- 18 12  # a rope's swing
 cargo run -p jsw-core --example map -- docs/jsw-mansion.svg   # the whole house
+```
+
+The same three take `--jsw2` and show the second mansion instead:
+
+```bash
+cargo run -p jsw-core --features debug --example dump_rooms -- /tmp/rooms2 --jsw2
+cargo run -p jsw-core --example room_info -- --jsw2 31
+cargo run -p jsw-core --example map -- --jsw2 /tmp/jsw2-mansion.svg
 ```
 
 F6 shows the same map in the game, drawn on the Spectrum screen with the room

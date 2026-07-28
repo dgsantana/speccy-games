@@ -12,16 +12,25 @@ use std::sync::OnceLock;
 use speccy::layout::COLUMNS;
 use speccy::memory::{ATTR_FILE, DISPLAY, Memory, display_row_offset};
 
+use crate::game::Variant;
 use crate::room::Room;
 
 /// A room's place in the house, in room-sized steps from Willy's first room.
 pub type Place = (i32, i32);
 
-/// Most rooms name room 0 for an edge with nothing past it, so an exit to The
-/// Off Licence means "no exit" — except from The Bridge, which is next door to
-/// it.
-pub fn leads_somewhere(from: usize, dest: usize) -> bool {
-    dest != from && (dest != 0 || from == 1)
+/// Whether an exit is a door rather than a wall.
+///
+/// The two games say "nothing that way" differently. Jet Set Willy names room
+/// 0 for an edge with nothing past it, so an exit to The Off Licence means no
+/// exit — except from The Bridge, which really is next door to it. Jet Set
+/// Willy II names the room itself instead, and its Off Licence is a room like
+/// any other, reached from the Garden.
+#[must_use]
+pub fn leads_somewhere(variant: Variant, from: usize, dest: usize) -> bool {
+    match variant {
+        Variant::Jsw1 => dest != from && (dest != 0 || from == 1),
+        Variant::Jsw2 => dest != from,
+    }
 }
 
 /// The mansion's layout, worked out once.
@@ -49,15 +58,37 @@ impl Layout {
     }
 }
 
-/// The layout, built on first use.
-pub fn layout() -> &'static Layout {
-    static LAYOUT: OnceLock<Layout> = OnceLock::new();
-    LAYOUT.get_or_init(build)
+/// How many rooms a game has, for anything outside the crate that is walking
+/// them.
+#[must_use]
+pub fn room_count(variant: Variant) -> usize {
+    variant.room_count()
 }
 
-fn build() -> Layout {
-    let rooms: HashMap<usize, Room> = (0..jsw_data::ROOM_COUNT)
-        .map(Room::load)
+/// One of them, loaded the way that game stores it.
+#[must_use]
+pub fn room(variant: Variant, number: usize) -> Room {
+    variant.room(number)
+}
+
+/// Jet Set Willy's layout, built on first use.
+pub fn layout() -> &'static Layout {
+    layout_of(Variant::Jsw1)
+}
+
+/// The layout of whichever mansion, built on first use.
+pub fn layout_of(variant: Variant) -> &'static Layout {
+    static JSW1: OnceLock<Layout> = OnceLock::new();
+    static JSW2: OnceLock<Layout> = OnceLock::new();
+    match variant {
+        Variant::Jsw1 => JSW1.get_or_init(|| build(Variant::Jsw1)),
+        Variant::Jsw2 => JSW2.get_or_init(|| build(Variant::Jsw2)),
+    }
+}
+
+fn build(variant: Variant) -> Layout {
+    let rooms: HashMap<usize, Room> = (0..variant.room_count())
+        .map(|number| variant.room(number))
         .filter(Room::is_real)
         .map(|room| (room.number, room))
         .collect();
@@ -66,8 +97,8 @@ fn build() -> Layout {
     let mut oddities = Vec::new();
     let mut queue = VecDeque::new();
 
-    places.insert(crate::game::START_ROOM, (0, 0));
-    queue.push_back(crate::game::START_ROOM);
+    places.insert(variant.start_room(), (0, 0));
+    queue.push_back(variant.start_room());
 
     while let Some(number) = queue.pop_front() {
         let here = places[&number];
@@ -81,7 +112,7 @@ fn build() -> Layout {
             (room.exits.down, (0, 1)),
         ] {
             let dest = usize::from(dest);
-            if !leads_somewhere(number, dest) || !rooms.contains_key(&dest) {
+            if !leads_somewhere(variant, number, dest) || !rooms.contains_key(&dest) {
                 continue;
             }
             let want = (here.0 + step.0, here.1 + step.1);
@@ -125,11 +156,11 @@ const UNVISITED: u8 = 5;
 ///
 /// Each room is a two-by-two block of cells, which fits the mansion's fifteen
 /// by eight into thirty by sixteen with the bottom rows left for the name.
-pub fn draw(mem: &mut Memory, current: usize, visited: &[bool], name: &[u8; 32]) {
+pub fn draw(mem: &mut Memory, variant: Variant, current: usize, visited: &[bool], name: &[u8; 32]) {
     mem.fill(DISPLAY, 6144, 0);
     mem.fill(ATTR_FILE, 768, 0);
 
-    let layout = layout();
+    let layout = layout_of(variant);
     for &room in layout.places.keys() {
         let Some((x, y)) = layout.cell_of(room) else {
             continue;
@@ -245,7 +276,13 @@ mod tests {
         let room = Room::load(crate::game::START_ROOM);
         let mut visited = vec![false; jsw_data::ROOM_COUNT];
         visited[crate::game::START_ROOM] = true;
-        draw(&mut mem, crate::game::START_ROOM, &visited, &room.name);
+        draw(
+            &mut mem,
+            Variant::Jsw1,
+            crate::game::START_ROOM,
+            &visited,
+            &room.name,
+        );
 
         let (x, y) = layout().cell_of(crate::game::START_ROOM).expect("placed");
         let attr = mem.read(ATTR_FILE + ((y * 2 * 32) + x * 2) as u16);

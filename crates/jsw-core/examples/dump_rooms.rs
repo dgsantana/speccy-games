@@ -17,17 +17,34 @@ fn main() {
     std::fs::create_dir_all(&dir).expect("could not create output directory");
 
     let rooms: Vec<usize> = args.filter_map(|a| a.parse().ok()).collect();
+    let map = std::env::args().any(|a| a == "--map");
+    let jsw2 = std::env::args().any(|a| a == "--jsw2");
     let rooms = if rooms.is_empty() {
-        (0..jsw_core::ROOM_COUNT).collect()
+        let count = if jsw2 {
+            jsw2_data::ROOM_COUNT
+        } else {
+            jsw_core::ROOM_COUNT
+        };
+        (0..count).collect()
     } else {
         rooms
     };
 
-    let map = std::env::args().any(|a| a == "--map");
-
     let mut frame = Frame::new();
     for number in rooms {
-        let mut game = Game::started();
+        let mut game = if jsw2 {
+            Game::new_jsw2()
+        } else {
+            Game::started()
+        };
+        if jsw2 {
+            // A Jet Set Willy II game starts on its title screen; step past it
+            // so a room is loaded before we ask for one.
+            game.update(Input {
+                start: true,
+                ..Input::default()
+            });
+        }
         game.goto_room(number);
         game.debug.map = map;
         game.update(Input::default());
