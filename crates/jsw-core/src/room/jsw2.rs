@@ -70,6 +70,80 @@ pub fn shape_end(number: usize) -> u16 {
     at
 }
 
+/// Where a room's name starts: past the shape pointer, the high bits, the eight
+/// pattern bytes and the name-and-border byte.
+const NAME_OFFSET: u16 = 12;
+
+/// Room `number`'s name, with its tokens expanded.
+///
+/// The name is stored as bytes whose last one has bit 7 set. A byte below 32 is
+/// not a character but an index into the table of words the game builds names
+/// from - so The Off Licence is stored as the token for "The " and then the
+/// eleven characters of "Off Licence".
+#[must_use]
+pub fn name(number: usize) -> String {
+    let mut text = String::new();
+    let mut at = room_at(number).wrapping_add(NAME_OFFSET);
+    loop {
+        let byte = jsw2_data::read(at);
+        at = at.wrapping_add(1);
+        let ch = byte & 127;
+        if ch < 32 {
+            text.push_str(&token(ch));
+        } else {
+            text.push(ch as char);
+        }
+        if byte & 128 != 0 {
+            break;
+        }
+    }
+    // A token carries a space after it, so a name ending in one has a space it
+    // does not want.
+    text.trim_end().to_owned()
+}
+
+/// Where a room's name ends, which is where its exits are.
+#[must_use]
+pub fn name_end(number: usize) -> u16 {
+    let mut at = room_at(number).wrapping_add(NAME_OFFSET);
+    while jsw2_data::read(at) & 128 == 0 {
+        at = at.wrapping_add(1);
+    }
+    at.wrapping_add(1)
+}
+
+/// The `index`th word of the token table, with the space that follows it in a
+/// name. Each word ends at the byte with bit 7 set.
+fn token(index: u8) -> String {
+    let mut at = jsw2_data::TOKENS;
+    for _ in 1..index {
+        while jsw2_data::read(at) & 128 == 0 {
+            at = at.wrapping_add(1);
+        }
+        at = at.wrapping_add(1);
+    }
+
+    let mut word = String::new();
+    loop {
+        let byte = jsw2_data::read(at);
+        at = at.wrapping_add(1);
+        let ch = byte & 127;
+        // A token can start with a token: "Megatree" is stored as the word for
+        // "The" and then its own letters, which is how "Under The Megatree"
+        // costs two bytes in the room.
+        if ch < 32 {
+            word.push_str(&token(ch));
+        } else {
+            word.push(ch as char);
+        }
+        if byte & 128 != 0 {
+            break;
+        }
+    }
+    word.push(' ');
+    word
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,6 +167,25 @@ mod tests {
         // cells. Room 34 is one, and overshoots by twelve.
         let cells = cells(34);
         assert_eq!(cells.len(), CELLS);
+    }
+
+    #[test]
+    fn room_names_expand_through_the_token_table() {
+        // Room 0's name is stored as the token for "The " and then "Off Licence".
+        assert_eq!(name(0), "The Off Licence");
+
+        for number in 0..jsw2_data::ROOM_COUNT {
+            let name = name(number);
+            assert!(!name.is_empty(), "room {number} has no name");
+            assert!(
+                name.len() <= 32,
+                "room {number} is called {name:?}, which will not fit on the screen"
+            );
+            assert!(
+                name.bytes().all(|b| (32..127).contains(&b)),
+                "room {number} is called {name:?}, which is not printable"
+            );
+        }
     }
 
     #[test]

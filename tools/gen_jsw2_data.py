@@ -38,7 +38,7 @@ ROOM_TABLE_POINTER = 0x7E69
 # a 9-bit value times nine.
 CELL_TABLE = 0x8C78
 # The words room names are built from, each ending in a byte with bit 7 set.
-TOKENS = 0xFA85
+TOKENS = 0xFA82
 ROOM_COUNT = 134
 
 HEAD = """\

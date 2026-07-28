@@ -29,7 +29,7 @@ pub const ROOM_TABLE: u16 = 47869;
 pub const CELL_TABLE: u16 = 35960;
 
 /// The words room names are built from, each ending in a byte with bit 7 set.
-pub const TOKENS: u16 = 64133;
+pub const TOKENS: u16 = 64130;
 
 /// The byte at `addr`, or zero below [`BASE`].
 #[must_use]
