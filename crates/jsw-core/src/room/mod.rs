@@ -106,6 +106,20 @@ pub struct Room {
     pub item: [u8; 8],
     pub exits: Exits,
     pub entities: [EntitySlot; 8],
+    /// Jet Set Willy II's own cell types, one per cell, when this is one of its
+    /// rooms: 0 air, 1 water, 2 earth, 3 fire, 4 forward ramp, 5 left conveyor,
+    /// 6 item, 7 back ramp, 8 right conveyor.
+    ///
+    /// Jet Set Willy has nothing like it, and does not need one: there, what a
+    /// cell is can be read off its colour, because a room's six tiles have six
+    /// distinct attributes. Jet Set Willy II draws its rooms from one shared
+    /// table of 512 cell graphics, so colours repeat - in 47 of its rooms the
+    /// deadly tile is the same colour as a floor or a wall - and the only
+    /// reliable answer is the type the room was stored with.
+    pub types: Option<[u8; CELLS]>,
+    /// The graphic for each of those nine types, when [`Room::types`] is set.
+    /// Air has none: it is left black.
+    type_tiles: Option<[Tile; 8]>,
 }
 
 impl Room {
@@ -163,6 +177,8 @@ impl Room {
                 down: bytes[offset::EXITS + 3],
             },
             entities,
+            types: None,
+            type_tiles: None,
         }
     }
 
@@ -192,16 +208,20 @@ impl Room {
 
         // The eight slots start at water, not at air: air has no graphic at all
         // and is left black, which is why a room's background is the paper the
-        // Spectrum starts with. So the slots run one behind the cell types, and
-        // the last two - the back ramp and the right-hand conveyor - name the
-        // same graphics as the forward ramp and the left-hand conveyor do.
+        // Spectrum starts with. So slot N draws cell type N + 1.
+        let type_tiles: [Tile; 8] =
+            std::array::from_fn(|slot| jsw2::cell_graphic(read.patterns[slot]));
+
+        // The six the engine names, for anything that still asks that way. The
+        // ramp and the conveyor take the forward and left-hand graphics; their
+        // opposite numbers are drawn from [`Room::type_tiles`].
         let tiles = [
             Tile::default(),
-            jsw2::cell_graphic(read.patterns[0]),
-            jsw2::cell_graphic(read.patterns[1]),
-            jsw2::cell_graphic(read.patterns[2]),
-            jsw2::cell_graphic(read.patterns[3]),
-            jsw2::cell_graphic(read.patterns[4]),
+            type_tiles[0],
+            type_tiles[1],
+            type_tiles[2],
+            type_tiles[3],
+            type_tiles[4],
         ];
 
         let mut name = [32u8; 32];
@@ -218,9 +238,11 @@ impl Room {
             conveyor: conveyor_of(&read.cells),
             ramp: ramp_of(&read.cells),
             border: read.border,
-            item: jsw2::cell_graphic(read.patterns[5]).pixels,
+            item: type_tiles[5].pixels,
             exits: read.exits,
             entities: [EntitySlot::default(); 8],
+            types: Some(read.cells),
+            type_tiles: Some(type_tiles),
         }
     }
 
@@ -234,7 +256,14 @@ impl Room {
     }
 
     /// What is at a cell, taking the ramp and conveyor into account.
+    ///
+    /// A Jet Set Willy II room answers from the types it was stored with, which
+    /// is the only way to get a room with two ramps in it right: Jet Set
+    /// Willy's model has room for one of each, and the second would be lost.
     pub fn kind_at(&self, row: usize, column: usize) -> Kind {
+        if let Some(types) = &self.types {
+            return Self::kind_of_type(types[row * COLUMNS + column]);
+        }
         if self.ramp_cells().any(|cell| cell == (row, column)) {
             return Kind::Ramp;
         }
@@ -246,6 +275,55 @@ impl Room {
             1 => Kind::Floor,
             2 => Kind::Wall,
             _ => Kind::Nasty,
+        }
+    }
+
+    /// Which of the engine's six kinds one of Jet Set Willy II's nine cell
+    /// types is. A cell with an item in it is walked through like any other
+    /// background cell.
+    fn kind_of_type(cell: u8) -> Kind {
+        match cell {
+            1 => Kind::Floor,
+            2 => Kind::Wall,
+            3 => Kind::Nasty,
+            4 | 7 => Kind::Ramp,
+            5 | 8 => Kind::Conveyor,
+            _ => Kind::Background,
+        }
+    }
+
+    /// Whether the cell at (`row`, `column`) is `kind`.
+    ///
+    /// This is the question the engine actually asks, and the two games answer
+    /// it differently. Jet Set Willy compares the colour in the working buffer
+    /// against the room's tile, which is what the original does at 36406 and
+    /// everywhere else it tests the ground. Jet Set Willy II cannot: its rooms
+    /// come from a shared table of cell graphics and their colours repeat, so
+    /// in 47 rooms the deadly tile is the colour of a floor. It answers from
+    /// the cell types instead.
+    #[must_use]
+    pub fn is_at(&self, mem: &speccy::Memory, row: usize, column: usize, kind: Kind) -> bool {
+        if row >= ROWS || column >= COLUMNS {
+            return false;
+        }
+        if self.types.is_some() {
+            return self.kind_at(row, column) == kind;
+        }
+        let at = ATTR_BUF + (row * COLUMNS + column) as u16;
+        mem.read(at) == self.tile(kind).attr
+    }
+
+    /// Which way the conveyor under a cell runs, if there is one there: 0 left,
+    /// 1 right. A Jet Set Willy II room can have several, going different ways.
+    #[must_use]
+    pub fn conveyor_direction_at(&self, row: usize, column: usize) -> Option<u8> {
+        match &self.types {
+            Some(types) => match types[row * COLUMNS + column] {
+                5 => Some(0),
+                8 => Some(1),
+                _ => None,
+            },
+            None => Some(self.conveyor.direction),
         }
     }
 
@@ -330,11 +408,27 @@ impl Room {
         }]
     }
 
+    /// The graphic a cell is drawn with.
+    ///
+    /// Jet Set Willy II has eight of them to the engine's six, because its two
+    /// ramps and its two conveyors are drawn differently from each other even
+    /// though they behave the same way.
+    #[must_use]
+    pub fn tile_at(&self, row: usize, column: usize) -> Tile {
+        match (&self.types, &self.type_tiles) {
+            (Some(types), Some(tiles)) => match types[row * COLUMNS + column] {
+                0 => Tile::default(),
+                cell => tiles[cell as usize - 1],
+            },
+            _ => self.tile(self.kind_at(row, column)),
+        }
+    }
+
     /// Draw the room into the empty-room buffers, which every frame starts from.
     pub fn draw(&self, mem: &mut Memory) {
         for row in 0..ROWS {
             for column in 0..COLUMNS {
-                let tile = self.tile(self.kind_at(row, column));
+                let tile = self.tile_at(row, column);
                 mem.write(ATTR_BACK + (row * COLUMNS + column) as u16, tile.attr);
                 for (pixel_row, &byte) in tile.pixels.iter().enumerate() {
                     let at = SCREEN_BACK + cell_offset(row, pixel_row, column) as u16;
@@ -662,5 +756,53 @@ mod tests {
             (0..COLUMNS).any(|column| room.kind_at(15, column) == Kind::Floor),
             "nothing to stand on in room 0"
         );
+    }
+
+    #[test]
+    fn a_jsw2_room_keeps_both_its_ramps_and_invents_no_conveyor() {
+        // Macaroni Ted has two ramps - one climbing each way - and no conveyor
+        // at all. Jet Set Willy's model holds one ramp and one conveyor, so the
+        // second ramp used to vanish, and the room's floor was shoved sideways
+        // because its colour matched the conveyor graphic the room never uses.
+        let room = Room::load_jsw2(62);
+        assert_eq!(room.title, "Macaroni Ted");
+
+        let ramps = (0..ROWS)
+            .flat_map(|row| (0..COLUMNS).map(move |column| (row, column)))
+            .filter(|&(row, column)| room.kind_at(row, column) == Kind::Ramp)
+            .count();
+        assert_eq!(ramps, 10, "both ramps should be there, five cells each");
+
+        let mem = Memory::new();
+        for column in 0..COLUMNS {
+            assert!(
+                !room.is_at(&mem, 15, column, Kind::Conveyor),
+                "the floor at column {column} is not a conveyor"
+            );
+        }
+    }
+
+    #[test]
+    fn a_jsw2_floor_is_not_deadly_just_because_it_shares_a_colour() {
+        // First Landing's fire tile is the same colour as its water tile, so
+        // reading the colour made its floor kill Willy on contact.
+        let room = Room::load_jsw2(26);
+        assert_eq!(room.title, "First Landing");
+        assert_eq!(
+            room.tile(Kind::Nasty).attr,
+            room.tile(Kind::Floor).attr,
+            "this test is pointless unless the two really do share a colour"
+        );
+
+        let mem = Memory::new();
+        let floors = (0..ROWS)
+            .flat_map(|row| (0..COLUMNS).map(move |column| (row, column)))
+            .filter(|&(row, column)| room.kind_at(row, column) == Kind::Floor);
+        for (row, column) in floors {
+            assert!(
+                !room.is_at(&mem, row, column, Kind::Nasty),
+                "the floor at ({row},{column}) kills him"
+            );
+        }
     }
 }

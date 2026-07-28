@@ -712,12 +712,25 @@ impl Game {
         let here = self.mem.read(at);
         let background = self.room.tile(crate::room::Kind::Background).attr;
 
-        if here == background && reaches {
+        // Jet Set Willy II's rooms share one table of cell graphics, so a
+        // colour does not say what a cell is; the room answers from the types
+        // it was stored with instead. See `Room::is_at`.
+        if self
+            .room
+            .is_at(&self.mem, row, column, crate::room::Kind::Background)
+            && reaches
+        {
             // White ink, and whatever paper and brightness the background has.
-            self.mem.write(at, background | 7);
+            let paper = if self.room.types.is_some() {
+                here & 248
+            } else {
+                background
+            };
+            self.mem.write(at, paper | 7);
         }
 
-        here == self.room.tile(crate::room::Kind::Nasty).attr
+        self.room
+            .is_at(&self.mem, row, column, crate::room::Kind::Nasty)
     }
     /// Replace the screen with a map of the mansion, if that switch is on.
     #[inline]
@@ -1738,7 +1751,10 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(game.room.number, 69, "he never walked out of The Off Licence");
+        assert_eq!(
+            game.room.number, 69,
+            "he never walked out of The Off Licence"
+        );
         assert_eq!(game.room.title, "Garden");
     }
 

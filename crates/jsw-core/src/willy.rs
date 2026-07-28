@@ -151,7 +151,7 @@ impl Willy {
 
         // The cell under the foot on the side the ramp climbs from.
         let under = if climbs_right { column + 1 } else { column };
-        if row + 2 >= ROWS || cell_attr(mem, row + 2, under) != room.tile(Kind::Ramp).attr {
+        if row + 2 >= ROWS || !room.is_at(mem, row + 2, under, Kind::Ramp) {
             return 0;
         }
 
@@ -243,9 +243,9 @@ impl Willy {
         self.sync_cell();
 
         // Hitting a wall with the top of his head ends the jump early.
-        let wall = room.tile(Kind::Wall).attr;
         let (row, column) = self.position();
-        if cell_attr(mem, row, column) == wall || cell_attr(mem, row, column + 1) == wall {
+        if room.is_at(mem, row, column, Kind::Wall) || room.is_at(mem, row, column + 1, Kind::Wall)
+        {
             self.y = self.y.wrapping_add(16) & 240;
             self.sync_cell();
             self.airborne = 2;
@@ -283,14 +283,12 @@ impl Willy {
                 return Outcome::Below;
             }
 
-            let below_left = cell_attr(mem, row + 2, column);
-            let below_right = cell_attr(mem, row + 2, column + 1);
-            let nasty = room.tile(Kind::Nasty).attr;
-            let background = room.tile(Kind::Background).attr;
+            let deadly = room.is_at(mem, row + 2, column, Kind::Nasty)
+                || room.is_at(mem, row + 2, column + 1, Kind::Nasty);
+            let empty = room.is_at(mem, row + 2, column, Kind::Background)
+                && room.is_at(mem, row + 2, column + 1, Kind::Background);
 
-            let standing = below_left != nasty
-                && below_right != nasty
-                && (below_left != background || below_right != background);
+            let standing = !deadly && !empty;
             if standing {
                 if self.airborne >= FATAL_FALL {
                     return Outcome::Died;
@@ -343,11 +341,15 @@ impl Willy {
         if self.airborne == 0 && self.y & 14 == 0 && !self.on_rope() {
             let (row, column) = self.position();
             if row + 2 < ROWS {
-                let conveyor = room.tile(Kind::Conveyor).attr;
-                let on_belt = cell_attr(mem, row + 2, column) == conveyor
-                    || cell_attr(mem, row + 2, column + 1) == conveyor;
-                if on_belt {
-                    if room.conveyor.direction == 0 {
+                // Which belt he is on matters: a Jet Set Willy II room can
+                // have several, running different ways.
+                let belt = [column, column + 1].into_iter().find_map(|column| {
+                    room.is_at(mem, row + 2, column, Kind::Conveyor)
+                        .then(|| room.conveyor_direction_at(row + 2, column))
+                        .flatten()
+                });
+                if let Some(direction) = belt {
+                    if direction == 0 {
                         left = true;
                     } else {
                         right = true;
@@ -435,9 +437,11 @@ impl Willy {
         }
 
         // A wall in the way stops him where he stands.
-        let wall = room.tile(Kind::Wall).attr;
+
         let ahead = if rightwards { target + 1 } else { target };
-        if cell_attr(mem, new_row, ahead) == wall || cell_attr(mem, new_row + 1, ahead) == wall {
+        if room.is_at(mem, new_row, ahead, Kind::Wall)
+            || room.is_at(mem, new_row + 1, ahead, Kind::Wall)
+        {
             return Outcome::None;
         }
 
@@ -466,7 +470,7 @@ impl Willy {
             return Climb::Level;
         }
         let (row, column) = self.position();
-        let ramp = room.tile(Kind::Ramp).attr;
+
         let climbs_right = room.ramp.direction != 0;
 
         let (probe, climb) = match (rightwards, climbs_right) {
@@ -478,7 +482,7 @@ impl Willy {
             (true, false) => ((row + 2, column), Climb::Down),
         };
 
-        if probe.0 < ROWS && probe.1 < COLUMNS && cell_attr(mem, probe.0, probe.1) == ramp {
+        if room.is_at(mem, probe.0, probe.1, Kind::Ramp) {
             climb
         } else {
             Climb::Level
@@ -542,6 +546,7 @@ pub struct Input {
 }
 
 /// The attribute of a cell in the working buffer.
+#[cfg_attr(not(test), allow(dead_code))]
 fn cell_attr(mem: &speccy::Memory, row: usize, column: usize) -> u8 {
     if row >= ROWS || column >= COLUMNS {
         return 0;
