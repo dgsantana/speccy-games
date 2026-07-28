@@ -9,6 +9,8 @@
 //! name-and-border byte, and a name. The shape unpacks to 512 cells, and the
 //! exits, the guardians and the arrows follow it.
 
+use super::{Exits, Tile};
+
 /// Cells in a room: thirty-two across, sixteen down.
 pub const CELLS: usize = 512;
 
@@ -144,6 +146,129 @@ fn token(index: u8) -> String {
     word
 }
 
+/// Everything a room entry holds, before it is turned into a [`super::Room`].
+#[derive(Debug, Clone)]
+pub struct Entry {
+    /// Cell type per cell, row-major: 0 air, 1 water, 2 earth, 3 fire,
+    /// 4 forward ramp, 5 left conveyor, 6 item, 7 back ramp, 8 right conveyor.
+    pub cells: [u8; CELLS],
+    /// The eight cell graphics the room draws itself with, as indices into the
+    /// cell table.
+    pub patterns: [u16; 8],
+    pub exits: Exits,
+    /// Whether a rope hangs in this room. Where it hangs is decided by the
+    /// room's special-case code, which nothing reads yet.
+    pub rope: bool,
+    pub conveyor_animates: bool,
+    /// The room's special-case code, from T5. Recorded, not acted on.
+    pub special: u8,
+    /// Seven bytes each, at most eight between these and the arrows.
+    pub guardians: Vec<[u8; 7]>,
+    pub arrows: Vec<[u8; 2]>,
+    pub name: String,
+    pub border: u8,
+}
+
+/// Read room `number`'s entry.
+#[must_use]
+pub fn entry(number: usize) -> Entry {
+    let at = room_at(number);
+
+    // Eight cell pattern bytes, each with its ninth bit in the high-bits byte:
+    // bit 7 of that byte is bit 8 of the first pattern, bit 6 of the second,
+    // and so on down.
+    let high = jsw2_data::read(at.wrapping_add(2));
+    let mut patterns = [0u16; 8];
+    for (slot, pattern) in patterns.iter_mut().enumerate() {
+        let low = jsw2_data::read(at.wrapping_add(3 + slot as u16));
+        let ninth = (high >> (7 - slot)) & 1;
+        *pattern = u16::from(low) | (u16::from(ninth) << 8);
+    }
+
+    // The exits follow the name, in the order left, up, right, down - not the
+    // order Jet Set Willy stores them in.
+    let mut after = name_end(number);
+    let exits = Exits {
+        left: jsw2_data::read(after),
+        up: jsw2_data::read(after.wrapping_add(1)),
+        right: jsw2_data::read(after.wrapping_add(2)),
+        down: jsw2_data::read(after.wrapping_add(3)),
+    };
+    after = after.wrapping_add(4);
+
+    let t4 = jsw2_data::read(after);
+    after = after.wrapping_add(1);
+    let t5 = if t4 & 16 != 0 {
+        let byte = jsw2_data::read(after);
+        after = after.wrapping_add(1);
+        byte
+    } else {
+        0
+    };
+
+    let mut guardians = Vec::new();
+    for _ in 0..(t4 & 15) {
+        let mut record = [0u8; 7];
+        for (index, byte) in record.iter_mut().enumerate() {
+            *byte = jsw2_data::read(after.wrapping_add(index as u16));
+        }
+        after = after.wrapping_add(7);
+        guardians.push(record);
+    }
+
+    // Arrows only exist if T5 says so, and take what is left of the eight slots
+    // the guardians did not use.
+    let mut arrows = Vec::new();
+    if t5 & 128 != 0 {
+        for _ in guardians.len()..8 {
+            let record = [
+                jsw2_data::read(after),
+                jsw2_data::read(after.wrapping_add(1)),
+            ];
+            // Two zero bytes end the list.
+            if record == [0, 0] {
+                break;
+            }
+            after = after.wrapping_add(2);
+            arrows.push(record);
+        }
+    }
+
+    Entry {
+        cells: cells(number),
+        patterns,
+        exits,
+        rope: t4 & 128 != 0,
+        conveyor_animates: t4 & 64 != 0,
+        special: t5 & 63,
+        guardians,
+        arrows,
+        name: name(number),
+        border: jsw2_data::read(at.wrapping_add(11)) & 7,
+    }
+}
+
+/// The cell graphic a pattern names: nine bytes, an attribute and eight rows.
+///
+/// Bit 7 of the attribute means inverse rather than flash. The game inverts
+/// those cells as it starts up and clears the bit, so that is done here.
+#[must_use]
+pub fn cell_graphic(pattern: u16) -> Tile {
+    let at = jsw2_data::CELL_TABLE.wrapping_add(pattern.wrapping_mul(9));
+    let attr = jsw2_data::read(at);
+    let inverse = attr & 128 != 0;
+
+    let mut pixels = [0u8; 8];
+    for (row, byte) in pixels.iter_mut().enumerate() {
+        let read = jsw2_data::read(at.wrapping_add(1 + row as u16));
+        *byte = if inverse { !read } else { read };
+    }
+    Tile {
+        attr: attr & 127,
+        pixels,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +311,40 @@ mod tests {
                 "room {number} is called {name:?}, which is not printable"
             );
         }
+    }
+
+    #[test]
+    fn a_room_entry_reads_out_whole() {
+        for number in 0..jsw2_data::ROOM_COUNT {
+            let room = entry(number);
+            assert!(
+                (room.exits.left as usize) <= jsw2_data::ROOM_COUNT
+                    && (room.exits.right as usize) <= jsw2_data::ROOM_COUNT
+                    && (room.exits.up as usize) <= jsw2_data::ROOM_COUNT
+                    && (room.exits.down as usize) <= jsw2_data::ROOM_COUNT,
+                "room {number} ({}) leads somewhere that is not a room: {:?}",
+                room.name,
+                room.exits
+            );
+            assert!(
+                room.guardians.len() + room.arrows.len() <= 8,
+                "room {number} has {} things moving in it",
+                room.guardians.len() + room.arrows.len()
+            );
+            assert!(
+                room.patterns.iter().all(|&p| p < 512),
+                "room {number} names a cell graphic past the table"
+            );
+        }
+    }
+
+    #[test]
+    fn the_cell_graphics_of_the_first_room_are_the_ones_in_memory() {
+        let room = entry(0);
+        // Room 0's first slot is cell graphic 0, which is nine bytes at 35960.
+        let tile = cell_graphic(room.patterns[0]);
+        assert_eq!(tile.attr, jsw2_data::read(jsw2_data::CELL_TABLE) & 127);
+        assert_eq!(tile.pixels[0], jsw2_data::read(jsw2_data::CELL_TABLE + 1));
     }
 
     #[test]
