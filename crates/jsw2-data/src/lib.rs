@@ -17,10 +17,13 @@ pub const BASE: u16 = 32768;
 /// Rooms in the mansion.
 pub const ROOM_COUNT: usize = 134;
 
-/// The word here holds the address of the room table. The format notes say to
-/// read it rather than hardcode the table, because it moves if the room count
-/// changes - so the engine reads it, and this is the only fixed address.
-pub const ROOM_TABLE_POINTER: u16 = 32361;
+/// Where the room table is.
+///
+/// The format notes say to read this from the word at 32361 rather than
+/// hardcode it, because it moves if the room count changes. That word sits
+/// below the window emitted here, so the generator follows it and writes the
+/// answer down; the address is still the game's own rather than a guess.
+pub const ROOM_TABLE: u16 = 47869;
 
 /// Cell graphics: nine bytes each, an attribute and eight pixel rows.
 pub const CELL_TABLE: u16 = 35960;

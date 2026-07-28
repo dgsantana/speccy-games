@@ -5,6 +5,8 @@
 //! six bitmaps travel with the room. That is why the mansion's rooms look so
 //! unlike each other.
 
+pub mod jsw2;
+
 use speccy::layout::{ATTR_BACK, ATTR_BUF, COLUMNS, ROWS, SCREEN_BACK, cell_offset};
 use speccy::memory::{Memory, add_lsb, lsb, msb};
 

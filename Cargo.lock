@@ -363,6 +363,7 @@ name = "jsw-core"
 version = "0.1.0"
 dependencies = [
  "jsw-data",
+ "jsw2-data",
  "speccy",
 ]
 
