@@ -2,7 +2,7 @@
 
 Faithful Rust ports of ZX Spectrum games, rendered with macroquad, behind a
 start screen that picks between them. Matthew Smith's *Manic Miner* (1983) and
-*Jet Set Willy* (1984) are the two that are written; Jet Set Willy II and III
+*Jet Set Willy* (1984) are the two that are written; Jet Set Willy II
 and Match Point are listed on the picker and are not. This file is the
 orientation guide for anyone — human or agent — picking the project up.
 

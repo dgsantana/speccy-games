@@ -36,11 +36,6 @@ pub const CATALOGUE: &[Entry] = &[
         launch: None,
     },
     Entry {
-        title: "JET SET WILLY III",
-        year: "SOON",
-        launch: None,
-    },
-    Entry {
         title: "MATCH POINT",
         year: "SOON",
         launch: None,
