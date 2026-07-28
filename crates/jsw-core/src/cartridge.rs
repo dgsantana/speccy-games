@@ -47,7 +47,7 @@ impl speccy::DebugSwitches for Game {
 
     fn level_count(&self) -> usize {
         // Not every block is a room; the debug keys stay out of the last few.
-        Game::real_room_count()
+        self.real_room_count()
     }
 
     fn level_name(&self) -> &str {

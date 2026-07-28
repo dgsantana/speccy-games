@@ -21,7 +21,7 @@ pub mod title;
 pub mod willy;
 
 pub use entity::Entities;
-pub use game::{FRAMES_PER_SECOND, Game};
+pub use game::{FRAMES_PER_SECOND, Game, Variant};
 pub use hud::Clock;
 pub use item::Items;
 pub use jsw_data::ROOM_COUNT;

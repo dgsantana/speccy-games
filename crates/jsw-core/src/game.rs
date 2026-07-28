@@ -33,6 +33,10 @@ pub const FRAMES_PER_SECOND: f32 = 17.0;
 /// The room Willy starts in: The Bathroom.
 pub const START_ROOM: usize = 33;
 
+/// Jet Set Willy II starts him in a bathroom too, but its rooms are numbered
+/// differently and that one is room 31.
+pub const JSW2_START_ROOM: usize = 31;
+
 /// Frames the death sequence lasts: the loop at 35708 fills the attribute file
 /// with 71 down to 64, one value a pass, so it is one frame per ink colour.
 const DEATH_FRAMES: u8 = 7;
@@ -46,6 +50,43 @@ pub const STARTING_LIVES: u8 = 7;
 /// against a 59ms frame, so notes cannot advance once a frame. This clock keeps
 /// the fraction, so the tempo is right on average and the error never piles up.
 const TUNE_UNITS_PER_FRAME: u32 = (256.0 / (FRAMES_PER_SECOND * 256.0 / 62_500.0)) as u32;
+
+/// Which of the two games this is.
+///
+/// The engine is the same; the rooms are stored differently, and a handful of
+/// movement rules changed between 1984 and 1985.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Variant {
+    Jsw1,
+    Jsw2,
+}
+
+impl Variant {
+    /// The room Willy starts the night in. Both games start him in a bathroom;
+    /// they disagree about which number that is.
+    fn start_room(self) -> usize {
+        match self {
+            Self::Jsw1 => START_ROOM,
+            Self::Jsw2 => JSW2_START_ROOM,
+        }
+    }
+
+    /// How many rooms this game has.
+    fn room_count(self) -> usize {
+        match self {
+            Self::Jsw1 => jsw_data::ROOM_COUNT,
+            Self::Jsw2 => jsw2_data::ROOM_COUNT,
+        }
+    }
+
+    /// Load one of them.
+    fn room(self, number: usize) -> Room {
+        match self {
+            Self::Jsw1 => Room::load(number),
+            Self::Jsw2 => Room::load_jsw2(number),
+        }
+    }
+}
 
 /// What the game is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +148,8 @@ pub struct Game {
     pub debug: speccy::Debug,
     /// Edge detection so a held key does not repeat.
     prev_input: speccy::Input,
+    /// Which of the two games this is.
+    variant: Variant,
     /// How far into the current half-note of the theme tune, in 1/256ths of a
     /// duration unit. Only the title screen uses it.
     tune_clock: u32,
@@ -138,7 +181,7 @@ impl Game {
             items: Items::new(),
             minute: 0,
             clock: crate::hud::Clock::default(),
-            visited: vec![false; jsw_data::ROOM_COUNT],
+            visited: vec![false; jsw2_data::ROOM_COUNT.max(jsw_data::ROOM_COUNT)],
             lives: STARTING_LIVES,
             mode: Mode::Playing,
             quest: Quest::default(),
@@ -150,21 +193,40 @@ impl Game {
             #[cfg(feature = "debug")]
             debug: speccy::Debug::default(),
             prev_input: speccy::Input::default(),
+            variant: Variant::Jsw1,
             tune_clock: 0,
         };
         game.enter_room(START_ROOM);
         game
     }
 
+    /// A new game of Jet Set Willy II, on its title screen.
+    #[must_use]
+    pub fn new_jsw2() -> Self {
+        let mut game = Self::started();
+        game.variant = Variant::Jsw2;
+        game.enter_room(JSW2_START_ROOM);
+        game.show_title();
+        game
+    }
+
+    /// Which game this is.
+    #[must_use]
+    pub fn variant(&self) -> Variant {
+        self.variant
+    }
+
     /// Back to the title screen, which is where the original goes when the game
     /// is over and when one in the morning comes round: everything is set up
     /// again from 34762, and the picture is drawn.
     fn show_title(&mut self) {
+        let variant = self.variant;
         let paused = self.paused;
         let music_off = self.music_off;
         #[cfg(feature = "debug")]
         let debug = self.debug;
         *self = Self::started();
+        self.variant = variant;
         self.paused = paused;
         self.music_off = music_off;
         #[cfg(feature = "debug")]
@@ -207,7 +269,7 @@ impl Game {
 
     /// Load a room, draw it into the empty-room buffers, and put its name up.
     fn enter_room(&mut self, number: usize) {
-        self.room = Room::load(number % jsw_data::ROOM_COUNT);
+        self.room = self.variant.room(number % self.variant.room_count());
         if let Some(seen) = self.visited.get_mut(self.room.number) {
             *seen = true;
         }
@@ -445,7 +507,7 @@ impl Game {
             self.mode = Mode::Playing;
             // Entering the room clears the bottom third of the screen, which
             // the title screen has been scrolling its message across.
-            self.enter_room(START_ROOM);
+            self.enter_room(self.variant.start_room());
             self.present();
             return;
         }
@@ -748,10 +810,11 @@ impl Game {
     /// The last three of the sixty-four blocks hold code, and jumping into one
     /// shows a screen of rubbish with a rubbish name.
     #[cfg(feature = "debug")]
-    pub fn real_room_count() -> usize {
-        (0..jsw_data::ROOM_COUNT)
-            .find(|&n| !Room::load(n).is_real())
-            .unwrap_or(jsw_data::ROOM_COUNT)
+    pub fn real_room_count(&self) -> usize {
+        let count = self.variant.room_count();
+        (0..count)
+            .find(|&n| !self.variant.room(n).is_real())
+            .unwrap_or(count)
     }
 }
 
@@ -1623,5 +1686,47 @@ mod tests {
             ..speccy::Input::default()
         });
         assert!(game.quit);
+    }
+
+    #[test]
+    fn a_jsw2_game_starts_in_the_second_mansion() {
+        let mut game = Game::new_jsw2();
+        assert_eq!(game.variant(), Variant::Jsw2);
+
+        // Straight past the title screen, into Jet Set Willy II's bathroom -
+        // which is not the room Jet Set Willy's bathroom is.
+        game.update(speccy::Input {
+            start: true,
+            ..speccy::Input::default()
+        });
+        game.sounds.clear();
+        assert_eq!(game.mode, Mode::Playing);
+        assert_eq!(game.room.number, JSW2_START_ROOM);
+        assert_eq!(game.room.title, "The Bathroom");
+        assert_eq!(game.lives, STARTING_LIVES);
+
+        // And he walks: four frames of holding right move him along a cell.
+        let (before, _) = (game.willy.position(), game.willy.y);
+        for _ in 0..4 {
+            game.update(speccy::Input {
+                right: true,
+                ..speccy::Input::default()
+            });
+            game.sounds.clear();
+        }
+        assert_ne!(game.willy.position(), before, "he never moved");
+    }
+
+    #[test]
+    fn every_jsw2_room_can_be_entered_and_stepped() {
+        for number in 0..jsw2_data::ROOM_COUNT {
+            let mut game = Game::new_jsw2();
+            game.mode = Mode::Playing;
+            game.enter_room(number);
+            for _ in 0..20 {
+                game.update(speccy::Input::default());
+                game.sounds.clear();
+            }
+        }
     }
 }
